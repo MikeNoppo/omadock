@@ -222,6 +222,7 @@ Item {
       target: tile
       shown: true
       level: tileTooltipLife.level
+      rises: tileTooltipLife.rises
       body: tileTooltipSurface
 
       BorderSurface {
