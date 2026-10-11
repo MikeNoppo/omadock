@@ -424,3 +424,11 @@ test("plateCorners: nested outer radius stops at a pill end and never goes negat
 test("readLabelConfig accepts the nested corners", () => {
   assert.equal(L.readLabelConfig({ labelMode: "always", labelShape: "nested" }).labelShape, "nested")
 })
+
+test("withNatural keeps one entry per slot and only its owner clears it", () => {
+  let m = L.withNatural({}, 3, "a", { text: 50, inner: 20, outer: 24, folded: 0 })
+  assert.deepEqual(plain(m), { 3: { owner: "a", text: 50, inner: 20, outer: 24, folded: 0 } })
+  assert.equal(L.withNatural(m, 3, "a", { text: 50, inner: 20, outer: 24, folded: 0 }), m)
+  assert.equal(L.withNatural(m, 3, "b", null), m)
+  assert.deepEqual(plain(L.withNatural(m, 3, "a", null)), {})
+})
