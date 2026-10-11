@@ -39,9 +39,20 @@ Item {
   readonly property real rowOffset: (root && stretch) ? DockLayout.rowOffset(root.placement.align, innerWidth, row.implicitWidth, plateDpr) : 0
   // Both sides: how far the right group rests past a packed row, from the
   // resting widths, so the magnification wave never measures itself. The
-  // trailing drop ghost is a zero-width item the row still spaces.
+  // gap and the spacing after it together take the card's free width.
   readonly property real spreadShift: (root && root.placement.align === "spread")
-    ? DockLayout.spreadHomeShift(innerWidth, root.baseRowWidth + DockLabels.extrasTotal(root.labelExtras) + row.spacing) : 0
+    ? DockLayout.spreadHomeShift(innerWidth, root.baseRowWidth + DockLabels.extrasTotal(root.labelExtras)) : 0
+  // Which label plates stand at their panel's edge, by label slot
+  // (DockLabels.plateEdges): the row's sections in order, cut where split
+  // sections cut the card into panels (as segments does).
+  readonly property var plateEdges: (root && root.labelPlates) ? DockLabels.plateEdges([
+    { n: root.appsSlots, labelled: true, cut: false },
+    { n: root.pinnedSection.length + root.groupSlots, labelled: true, cut: false },
+    { n: root.tileElements, labelled: false, cut: root.placement.split && root.hasLeftTileSeparator },
+    { n: root.visibleRunningCount, labelled: true, cut: root.placement.split && root.hasSeparator },
+    { n: root.folderSlots, labelled: true, cut: root.placement.split && (root.hasFolderSeparator || root.placement.align === "spread") },
+    { n: root.driveSlots, labelled: false, cut: root.placement.split && root.hasDriveSeparator }
+  ]) : []
   // Where the accent line of a drag inside the dock stands (DropGap): the
   // insert index in the pinned run or among the folders, -1 for none.
   readonly property int dropLineRow: (root && !root.dragRemoveArmed && root.dropRowIndex >= 0
@@ -629,7 +640,7 @@ Item {
             visible: !(root && (root.placement.split || root.placement.align === "spread"))
             anchors.horizontalCenter: parent.horizontalCenter
             y: root && root.dividerGeometry === "long"
-              ? dockCard.dividerTop - row.y - parent.y : (root ? root.iconCenterOffset : 0)
+              ? dockCard.dividerTop - row.y - rightRow.y - parent.y : (root ? root.iconCenterOffset : 0)
             width: dockCard.dividerWidth
             height: root && root.dividerGeometry === "long" ? dockCard.dividerLength : parent.height
             color: root ? root.dividerLineColor : Util.alpha(Color.bar.text, 0.25)
@@ -698,7 +709,7 @@ Item {
             visible: !(root && root.placement.split)
             anchors.horizontalCenter: parent.horizontalCenter
             y: root && root.dividerGeometry === "long"
-              ? dockCard.dividerTop - row.y - parent.y : (root ? root.iconCenterOffset : 0)
+              ? dockCard.dividerTop - row.y - rightRow.y - parent.y : (root ? root.iconCenterOffset : 0)
             width: dockCard.dividerWidth
             height: root && root.dividerGeometry === "long" ? dockCard.dividerLength : parent.height
             color: root ? root.dividerLineColor : Util.alpha(Color.bar.text, 0.25)

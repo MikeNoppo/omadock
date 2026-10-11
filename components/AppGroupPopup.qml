@@ -214,15 +214,19 @@ BorderSurface {
                   contrast: root ? root.iconContrast : 0
                   strength: root ? root.iconStrength : 1
                   showOriginal: root ? (root.iconHoverOriginal && cellMouseArea.containsMouse) : false
+                  hovered: cellHover.hovered && !cellItem.isDragging
                   hoverFx: root ? root.hoverFx : null
-                }
 
-                // Same mark as a dock badge, sitting on the menu surface.
-                BadgeMark {
-                  rootRef: root
-                  anchorRef: cellIcon
-                  count: cellItem.notificationCount
-                  rim: Color.menu.background
+                  // Same mark as a dock badge, on the menu surface; it rides
+                  // the hover effect with the icon, like the dock's.
+                  overlay: [
+                    BadgeMark {
+                      rootRef: cellItem.root
+                      anchorRef: parent
+                      count: cellItem.notificationCount
+                      rim: Color.menu.background
+                    }
+                  ]
                 }
               }
 
@@ -239,10 +243,11 @@ BorderSurface {
               }
 
               // Running/minimized state, one mark per window like the dock:
-              // active bar, open dot, parked hollow dot.
+              // active bar, open dot, parked hollow dot, at the dock's own
+              // size and spacing (DockMarkGeometry).
               Row {
                 anchors.horizontalCenter: parent.horizontalCenter
-                spacing: Style.space(2)
+                spacing: Style.space(3)
                 visible: cellItem.appWindows.length > 0
                 Repeater {
                   model: Math.min(3, cellItem.appWindows.length)
@@ -250,9 +255,8 @@ BorderSurface {
                     readonly property var winObj: cellItem.appWindows[index]
                     readonly property bool winMin: cellItem.isWinMinimized(winObj)
                     readonly property bool winActive: !winMin && cellItem.isWinActive(winObj)
-                    rootRef: root
+                    rootRef: cellItem.root
                     anchors.verticalCenter: parent.verticalCenter
-                    dense: true
                     kind: winActive ? "active" : (winMin ? "minimized" : "window")
                   }
                 }
@@ -335,9 +339,17 @@ BorderSurface {
                   return
                 }
                 if (mouse.button === Qt.RightButton) {
-                  // Right click: ungroup this app from the folder
-                  if (root && appGroupPopup.activeGroup) {
-                    root.removeAppFromGroup(appGroupPopup.activeGroup.id, cellItem.appId)
+                  // Right click: the app's own menu, as on the dock, over this
+                  // cell. The group closes first: the menu's surface takes the
+                  // focus grab and would dismiss it anyway. Closing destroys
+                  // this cell, so everything the menu needs is read before.
+                  if (root && appGroupPopup.activeGroup && appGroupPopup.popupWindow) {
+                    var dock = root
+                    var group = appGroupPopup.activeGroup
+                    var app = cellItem.appId
+                    var at = appGroupPopup.popupWindow.toDockWindow(cellItem, cellItem.width / 2, 0)
+                    dock.closeAppGroup()
+                    dock.openContext(app, at.x, at.y, group)
                   }
                 } else if (mouse.button === Qt.LeftButton) {
                   // Launch, focus, or park the app. The popup stays open so

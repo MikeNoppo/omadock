@@ -24,37 +24,31 @@
 # so end a test with `probe_cleanup || exit 1`.
 #
 # Notes worth keeping:
-#  - qs.* modules resolve from the CONFIG DIRECTORY, so the shell's Commons and
-#    Ui directories are symlinked into the probe directory; QML2_IMPORT_PATH
-#    does not help and the modules are otherwise "not installed".
-#  - An absolute path import needs the file: schema ("is not a valid import
-#    URL" without it).
-#  - XDG_RUNTIME_DIR is never overridden: the Wayland socket lives there
-#    (a redirected one fails with "Failed to create wl_display"). The IPC
-#    socket keys off the config path, so the probe stays separately addressable
-#    as `qs -p "$PROBE_DIR" ipc call omadock ...`.
+#  - qs.* modules resolve from the CONFIG DIRECTORY: the shell's Commons and Ui
+#    directories are symlinked into the probe directory (QML2_IMPORT_PATH does
+#    not help; otherwise they are "not installed"). An absolute path import
+#    needs the file: schema ("is not a valid import URL" without it).
+#  - XDG_RUNTIME_DIR is never overridden: the Wayland socket lives there (a
+#    redirected one fails with "Failed to create wl_display"). The IPC socket
+#    keys off the config path, so the probe stays addressable as
+#    `qs -p "$PROBE_DIR" ipc call omadock ...`.
 #  - A "qt.qpa.services ... portal" warning is normal for a second instance.
-#  - The probe is a real dock on the owner's session, so keep its surfaces off
-#    screen: never openSettings / openSettingsPage (a full-screen overlay would
-#    cover the owner's desktop) and never reveal / toggleVisibility without
-#    hiding again. The hide() at start and probe_stop are what make it
-#    invisible - a test that calls those on the probe is not non-intrusive.
+#  - Keep its surfaces off screen: never openSettings / openSettingsPage (a
+#    full-screen overlay would cover the owner's desktop) and never reveal /
+#    toggleVisibility without hiding again. The hide() at start and probe_stop
+#    are what make it invisible - a test that calls those is not non-intrusive.
 #
-# A probe session must leave NOTHING behind. The dock spawns helpers through
-# `Process` (scripts/drive-removal-watch.py, the folder scanner), and a helper
-# does not exit with the Quickshell process that spawned it: it is reparented
-# to the user's systemd and keeps running. Stopping only the shell therefore
-# leaked one helper per session, and the litter accumulated (80 were found on
-# this desktop). probe_stop now kills the probe's whole process group plus
-# every descendant it can see, and probe_cleanup fails the test if any process
-# of the session, or the scratch directory, survived - see tests/live/teardown.sh,
-# which counts survivors across fresh sessions and is the regression test for
-# this rule.
+# A probe session must leave NOTHING behind: the dock spawns helpers through
+# `Process` (scripts/drive-removal-watch.py, the folder scanner) and they do not
+# exit with the shell - they are reparented to the user's systemd and keep
+# running (80 had accumulated on this desktop). probe_stop kills the session's
+# whole process group plus every descendant it can see, and probe_cleanup fails
+# on a surviving process or scratch directory (tests/live/teardown.sh keeps it).
 #
-# Functions: probe_start, probe_ipc, probe_cfg, probe_wait_cfg, probe_log,
-#            probe_log_tail, probe_running, probe_pids, probe_descendants,
-#            probe_pgid, probe_group_pids, probe_cmdlines, probe_stop,
-#            probe_cleanup.
+# Functions: probe_start, probe_ipc, probe_cfg, probe_ready, probe_wait_cfg,
+#            probe_wait_presets, probe_log, probe_log_tail, probe_pids,
+#            probe_descendants, probe_pgid, probe_group_pids, probe_cmdlines,
+#            probe_stop, probe_cleanup.
 
 # PROBE_CFG_SRC points the probe at another config to copy: the owner's file
 # (the default) or, for a case the owner's config cannot show - a fresh install
@@ -69,26 +63,16 @@ PROBE_PID=""
 # The probe's own process group (it is started with `setsid --fork`, so the
 # group holds the shell and every helper it spawned) and what teardown saw.
 PROBE_PGID=""
-PROBE_KIDS=""
 PROBE_LEAKED=""
 
-# The plugin directory under test (not the live plugin under
-# ~/.config/omarchy/plugins/omadock, which follows the active profile).
-probe_root() { echo "$PROBE_ROOT"; }
-
-# Start the probe. 0 on success; on failure the log tail is printed and the
-# caller should probe_cleanup and stop.
 # The probe's own processes: real quickshell/qs binaries whose command line
-# names the probe directory. `pgrep -f` alone also matches any unrelated
-# process that merely mentions the path (a shell running a monitoring command,
-# an editor), which would both report a leak that is not there and, through
-# pkill -f, kill something that is not the probe. The executable is checked
-# for that reason, and cleanup kills the PIDs it identified.
+# names the probe directory. `pgrep -f` alone also matches anything that merely
+# mentions the path (an editor, a monitoring shell), which would report a leak
+# that is not there and, through pkill -f, kill something that is not ours.
 probe_pids() {
   local p exe
-  # No directory yet (probe_start refused a missing config, say): looking for
-  # " -p " with nothing after it would match any quickshell on this session -
-  # including the owner's dock - and report it as one of ours.
+  # No directory yet (probe_start refused a missing config, say): " -p " with
+  # nothing after it would match the owner's own dock and report it as ours.
   [ -n "$PROBE_DIR" ] || return 0
   for p in $(pgrep -f -- " -p $PROBE_DIR" 2>/dev/null); do
     exe=$(basename "$(readlink -f "/proc/$p/exe" 2>/dev/null || true)")
@@ -97,9 +81,8 @@ probe_pids() {
 }
 
 # The probe's process group: `setsid --fork` makes the Quickshell process a
-# group leader, so the group is the whole session - the shell and every helper
-# it spawned. Recorded at start, because the group is unreadable once the
-# leader is gone.
+# group leader, so the group is the whole session. Recorded at start, because
+# the group is unreadable once the leader is gone.
 probe_pgid() { [ -n "$PROBE_PGID" ] && echo "$PROBE_PGID"; }
 
 # This shell's own process group, so a group kill can never take the caller.
@@ -144,6 +127,20 @@ probe_cmdlines() {
   echo $out
 }
 
+# 1 when the dock has applied its config copy: its preset listing is not empty
+# (DockConfigLogic.qml:120 is that list's only writer, and a merge always yields
+# the shipped looks, so an empty listing means the file is not read yet). A
+# first read before it lands sees no preset at all - measured 1 session in 8 -
+# which is what made presets.sh fail intermittently; probe_start waits on this
+# so no call site has to wait on its own.
+probe_ready() {
+  probe_ipc presets 2>/dev/null | python3 -c 'import json,sys
+d = json.load(sys.stdin)
+sys.exit(0 if isinstance(d, list) and d else 1)' 2>/dev/null
+}
+
+# Start the probe. 0 on success; on failure the log tail is printed and the
+# caller should probe_cleanup and stop.
 probe_start() {
   local i
   if [ ! -f "$PROBE_OWNER_CFG" ]; then
@@ -176,9 +173,8 @@ PY
   ln -s /usr/share/omarchy/shell/Ui "$PROBE_DIR/Ui"
   # PROBE_BODY names a QML file whose contents become the body of ShellRoot,
   # for a test that must reach inside the dock (tests/live/label-metrics.sh).
-  # Such a body declares its own `Od.DockHost { id: ... }`; the default is the
-  # dock alone. Imports belong at the top of the file, so the body holds only
-  # the inside of ShellRoot.
+  # Such a body declares its own `Od.DockHost { ... }`; the default is the dock
+  # alone. Imports go at the top, so the body holds only what is inside ShellRoot.
   {
     printf 'import QtQuick\nimport Quickshell\nimport "file:%s" as Od\n\nShellRoot {\n' "$PROBE_ROOT"
     if [ -n "${PROBE_BODY:-}" ]; then cat "$PROBE_BODY"; else printf '  Od.DockHost { }\n'; fi
@@ -191,13 +187,13 @@ PY
     # torn down with its group (and its helpers) rather than left behind.
     [ -n "$PROBE_PID" ] || PROBE_PID=$(probe_pids | head -1)
     [ -n "$PROBE_PGID" ] || PROBE_PGID=$(ps -o pgid= -p "${PROBE_PID:-0}" 2>/dev/null | tr -d ' ')
-    if qs -p "$PROBE_DIR" ipc call omadock state >/dev/null 2>&1; then
+    if qs -p "$PROBE_DIR" ipc call omadock state >/dev/null 2>&1 && probe_ready; then
       probe_ipc hide >/dev/null 2>&1
       return 0
     fi
     sleep 0.5
   done
-  echo "probe: the dock never answered over IPC" >&2
+  echo "probe: the dock never answered over IPC with its config applied" >&2
   probe_log_tail >&2
   return 1
 }
@@ -209,17 +205,10 @@ probe_ipc() { qs -p "$PROBE_DIR" ipc call omadock "$@"; }
 # The probe's config copy: the only file a live test may assert on or mutate.
 probe_cfg() { echo "$PROBE_DIR/home/.config/omarchy/omadock.json"; }
 
-# Wait (up to ~8s) until a python predicate on the config copy holds. Argument 1
-# is the program, the config path is argv[1] and further arguments follow it; the
-# program exits non-zero while the dock has not written the file yet. A preset
-# save or delete lands on disk a moment after the IPC call returns, so a test
-# that reads the file straight after one races the write and reports a state
-# that has already passed. Best-effort pacing only: the caller keeps its own
-# assertion, which is what explains a real failure.
-#
-#   probe_wait_cfg 'import json,sys; c=json.load(open(sys.argv[1]));
-#                    sys.exit(0 if sys.argv[2] in [p["id"] for p in c.get("presets") or []] else 1)' "$id"
-#   python3 - "$CFG" "$id" <<'PY'   # the real assertion, with its diagnostics
+# Wait (up to ~8s) until a python predicate on the config copy holds: argv[1] is
+# the program, the config path is argv[2] and further arguments follow; it exits
+# non-zero while the dock has not written the file. Pacing only - the caller
+# keeps the assertion that explains a real failure (see probe_wait_presets).
 probe_wait_cfg() {
   local prog=$1 i
   shift
@@ -230,22 +219,32 @@ probe_wait_cfg() {
   return 1
 }
 
+# Wait until the presets in the config copy satisfy one condition: every id
+# given is present (`probe_wait_presets in <id>...`) or every id is absent
+# (`out <id>...`). A save or delete lands a moment after the IPC call returns.
+probe_wait_presets() {
+  local want=$1
+  shift
+  probe_wait_cfg 'import json,sys
+c = json.load(open(sys.argv[1]))
+ids = [p["id"] for p in c.get("presets") or []]
+hits = [i for i in sys.argv[3:] if i in ids]
+ok = hits == sys.argv[3:] if sys.argv[2] == "in" else not hits
+sys.exit(0 if ok else 1)' "$want" "$@"
+}
+
 probe_log() { echo "$PROBE_DIR/probe.log"; }
 
 probe_log_tail() { tail -20 "$PROBE_DIR/probe.log" 2>/dev/null; }
 
-probe_running() { [ -n "$PROBE_DIR" ] && [ -n "$(probe_pids)" ]; }
-
-# Stop the probe AND everything it spawned. The helpers a dock spawns under
-# `Process` are not killed by killing the shell - they are reparented and keep
-# running - so the session's whole process group is signalled, and any
-# descendant that left the group is hunted by PID. Whatever survived both is
-# recorded in PROBE_LEAKED for probe_cleanup to fail on.
+# Stop the probe AND everything it spawned: the helpers a dock spawns under
+# `Process` do not die with the shell (they are reparented), so the whole
+# process group is signalled and any descendant that left it is hunted by PID.
+# Whatever survives both is recorded in PROBE_LEAKED for probe_cleanup to fail.
 probe_stop() {
   local i pids pgid p survivors
   [ -n "$PROBE_DIR" ] || return 0
   pids=$(probe_pids)
-  [ -n "$PROBE_PID" ] && PROBE_KIDS=$(probe_descendants "$PROBE_PID")
   pgid=$(probe_pgid)
   if probe_group_killable "$pgid"; then kill -TERM -- "-$pgid" 2>/dev/null; fi
   [ -n "$pids" ] && kill $pids 2>/dev/null
@@ -324,7 +323,6 @@ probe_cleanup() {
   PROBE_DIR=""
   PROBE_PID=""
   PROBE_PGID=""
-  PROBE_KIDS=""
   PROBE_LEAKED=""
   return $rc
 }
