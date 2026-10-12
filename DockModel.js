@@ -973,7 +973,7 @@ function entryFor(appRows, appId) {
     if (!entry) continue
     var entryCands = getCandidates(entry.id)
       .concat(getCandidates(entry.name))
-      .concat(getCandidates(entry.icon))
+      .concat(getCandidates(String(entry.icon || "").replace(/^.*\//, "")))
     for (var k = 0; k < wantCands.length; k++) {
       var cand = wantCands[k]
       if (entryCands.indexOf(cand) >= 0) return entry
