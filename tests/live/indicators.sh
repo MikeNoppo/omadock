@@ -7,32 +7,25 @@
 # The marks are read as ink from a screenshot of the dock, so what is asserted
 # is the row that is actually drawn, not the source that draws it: renaming a
 # property or rewriting the row's layout passes as long as the marks stay
-# centred, and a row that declares a slot it does not draw fails. That spare
-# slot is the bug this guards - a Qt Grid reserves a gap for every slot it
-# declares, so the row's empty eighth slot left a lone accent bar 2 px off the
-# icon it belongs to.
+# centred, and a row that declares a slot it does not draw fails (a spare slot
+# left a lone bar 2 px off its icon: Qt Grids reserve gaps for declared slots).
 #
-# It opens its own windows with a terminal emulator this desktop is not already
-# running (so it knows how many marks to expect) and gives the dock a flat
-# opaque background for the run: behind a translucent one the wallpaper's
-# texture is indistinguishable from ink. omadock.json, the windows it opened
-# and the focus are all put back on exit.
+# It opens its own windows with an unused terminal emulator and gives the dock
+# a flat opaque background (wallpaper texture reads as ink). Config, windows
+# and focus are put back on exit.
 #
-# Keep the pointer off the item being measured: hovering scales it and lifts its
-# label, and the marks move with the icon.
+# Keep the pointer off the measured item: hover scales the icon and moves the marks.
 #
-# Exit: 0 the marks are centred; 1 the dock did not answer, or a mark is
-# off-centre / the row drew the wrong count; 2 nothing was measured, because
-# there was no terminal emulator left to open a window with. Never 0 without
-# measuring: a skip that exits 0 is a guard that cannot fail.
+# Exit: 0 centred; 1 no answer, off-centre, or wrong count; 2 nothing to open
+# a window with. Never 0 without measuring: a passing skip is a guard that
+# cannot fail.
 set -u
 cd "$(dirname "$0")/../.."
 . tests/live/common.sh
 wait_ready || exit 1
 
-# Slack: the bug measured 1.0-2.0 px, a centred row 0.0-0.5 px (each mark
-# rounds itself onto the pixel grid, which can move an outermost mark half a
-# pixel).
+# Slack: the bug measured 1.0-2.0 px, a centred row 0.0-0.5 px (pixel-grid
+# rounding can move an outermost mark half a pixel).
 TOL=0.75
 TITLE="omadock-live-ind"
 CFG=$HOME/.config/omarchy/omadock.json
@@ -207,12 +200,13 @@ if not raw:
 # colour. The dock guarantees the marks read against it, so the cut sits well
 # above the film grain's speckle (a few levels) and well below a mark's
 # contrast (a hundred or more).
-bg = collections.Counter(raw.values()).most_common(1)[0][0]
+near = [v for v in raw.values() if max(abs(a - b) for a, b in zip(v, (16, 16, 16))) <= 60] or list(raw.values())
+bg = collections.Counter(near).most_common(1)[0][0]
 ink = {p for p, v in raw.items() if max(abs(a - b) for a, b in zip(v, bg)) > 80}
 
 def groups(points):
     # Diagonals count as touching: the overflow pill's "+2" is two glyphs, and
-    # they are one mark.
+    # they are one mark (joined below when AA splits them).
     rest, found = set(points), []
     while rest:
         seed = rest.pop()
@@ -246,6 +240,15 @@ else:
     marks = [g for g in groups(ink) if is_mark(g) and min(p[0] for p in g) < strip]
 if not marks:
     report(f"no marks under {item_id} (is anything running there?)", False)
+# A split "+N" pill (two glyphs sharing one band) rejoins below.
+if item["windows"] > 5 and len(marks) == 6:
+    bi = [box(g) for g in marks]
+    hit = [(i, j) for i in range(6) for j in range(i + 1, 6)
+           if 2 <= max(bi[j][0] - bi[i][2], bi[i][0] - bi[j][2]) <= 3
+           and max(bi[j][1] - bi[i][3], bi[i][1] - bi[j][3]) < 0]
+    if hit:
+        i, j = hit[0]
+        marks = [g for k, g in enumerate(marks) if k != i and k != j] + [marks[i] | marks[j]]
 
 xs = [p[0] for g in marks for p in g]
 ys = [p[1] for g in marks for p in g]
@@ -273,9 +276,7 @@ report(line if ok else f"{line} · marks {widths}x{heights}", ok)
 PY
 }
 
-# A terminal this desktop is not already showing a window of, so the mark count
-# the dock reports for it is the one this test opened. Window classes carry the
-# emulator's name (foot, kitty, com.mitchellh.ghostty, ...).
+# An unused terminal emulator, so the counted marks are the ones this test opened.
 TERM_APP=""
 shown=$(hyprctl -j clients 2>/dev/null | python3 -c '
 import json, sys
@@ -297,8 +298,7 @@ if [ -z "$TERM_APP" ]; then
 fi
 
 counts > /tmp/omadock-ind-before
-# A flat opaque background without film grain: the marks are only a few pixels,
-# and ink has to be told apart from what is behind them.
+# Flat grain-free card, modal anchored at its colour: busy art can't elect the modal.
 set_cfg autohide=false showBackground=true bgColor=#101010 grain=0 labelMode=off \
   hoverEffect=off
 open_one
