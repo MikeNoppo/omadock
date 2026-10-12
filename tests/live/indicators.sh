@@ -134,7 +134,7 @@ focus_ours() {
 check() {
   focus_ours
   python3 - "$TOL" "$2" "$TARGET" "$1" <<'PY' || fail "$1"
-import collections, json, subprocess, sys
+import collections, json, subprocess, sys, time
 
 tol, mode, item_id, label = float(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
 
@@ -145,99 +145,95 @@ def report(msg, ok):
     print(f"{label}: {msg}")
     sys.exit(0 if ok else 1)
 
-# The dock's layer: its size is the screenshot's frame, its place on the monitor
-# is where grim has to cut from. Item rectangles are layer-local.
-layer = monitor = None
-for name, m in json.loads(out("hyprctl", "-j", "layers")).items():
-    for arr in m["levels"].values():
-        for l in arr:
-            if l.get("namespace") == "omadock":
-                monitor, layer = name, l
-if not layer:
-    report("the dock has no layer on screen (hidden?)", False)
-scale, mx, my = 1.0, 0, 0
-for m in json.loads(out("hyprctl", "-j", "monitors")):
-    if m["name"] == monitor:
-        scale, mx, my = m.get("scale", 1.0), m["x"], m["y"]
+for attempt in range(2):  # a second frame when the first caught the row mid-settle
+    # The dock's layer: its size is the screenshot's frame, its place on the monitor
+    # is where grim has to cut from. Item rectangles are layer-local.
+    layer = monitor = None
+    for name, m in json.loads(out("hyprctl", "-j", "layers")).items():
+        for arr in m["levels"].values():
+            for l in arr:
+                if l.get("namespace") == "omadock":
+                    monitor, layer = name, l
+    if not layer:
+        report("the dock has no layer on screen (hidden?)", False)
+    scale, mx, my = 1.0, 0, 0
+    for m in json.loads(out("hyprctl", "-j", "monitors")):
+        if m["name"] == monitor:
+            scale, mx, my = m.get("scale", 1.0), m["x"], m["y"]
 
-lx, ly = mx + layer["x"], my + layer["y"]
-shot = "/tmp/omadock-ind-shot.png"
-subprocess.run(["grim", "-g", f"{lx},{ly} {layer['w']}x{layer['h']}", shot], check=True)
+    lx, ly = mx + layer["x"], my + layer["y"]
+    shot = "/tmp/omadock-ind-shot.png"
+    subprocess.run(["grim", "-g", f"{lx},{ly} {layer['w']}x{layer['h']}", shot], check=True)
 
-item = next((i for i in json.loads(out("omarchy-shell", "omadock", "itemGeometry"))
-             if i["id"] == item_id), None)
-if not item:
-    report(f"the dock does not list {item_id}", False)
-x, y, w, h = item["x"], item["y"], item["w"], item["h"]
-# Hovering the item being measured scales it and lifts its label, and the marks
-# move with it: nothing on screen would match its rectangle.
-cursor = json.loads(out("hyprctl", "-j", "cursorpos"))
-if lx + x <= cursor.get("x", -1) < lx + x + w and ly + y <= cursor.get("y", -1) < ly + y + h:
-    report("the pointer is over the item being measured: move it away and re-run", False)
+    item = next((i for i in json.loads(out("omarchy-shell", "omadock", "itemGeometry"))
+                 if i["id"] == item_id), None)
+    if not item:
+        report(f"the dock does not list {item_id}", False)
+    x, y, w, h = item["x"], item["y"], item["w"], item["h"]
+    # Hovering the item being measured scales it and lifts its label, and the marks
+    # move with it: nothing on screen would match its rectangle.
+    cursor = json.loads(out("hyprctl", "-j", "cursorpos"))
+    if lx + x <= cursor.get("x", -1) < lx + x + w and ly + y <= cursor.get("y", -1) < ly + y + h:
+        report("the pointer is over the item being measured: move it away and re-run", False)
 
-# A row of marks sits in the item's bottom band, and the icon art above reaches
-# that band's top edge, so ink touching the top row is not a mark. A column sits
-# against the item's leading edge, the label plate hanging off it: the marks are
-# the ink that starts in the strip there, and the icon art, the plate and the
-# label text all begin to the right of it.
-# Both windows are measurement slack on purpose, not values read from
-# DockMarkGeometry.js: how big the marks are is what is being checked, so a
-# window that grew with the policy would follow a wrong size instead of
-# catching it. They only have to hold the marks and stop short of the art.
-band = max(10, round(8 * scale))
-strip = max(12, round(14 * scale))
-cx, cy, cw, ch = (x, y + h - band, w, band) if mode == "row" else (x, y, w, h)
-raw = {}
-for line in out("magick", shot, "-crop", f"{cw}x{ch}+{cx}+{cy}", "+repage", "txt:-").splitlines()[1:]:
-    point, rest = line.split(":", 1)
-    px, py = (int(v) for v in point.split(","))
-    hexv = rest.split("#")[1][:6]
-    raw[(px, py)] = tuple(int(hexv[i:i + 2], 16) for i in (0, 2, 4))
-if not raw:
-    report(f"nothing on screen at {item_id}", False)
-# Whatever the row draws stands out from what is behind it (the dock's own
-# background, or a label plate): ink is what differs from the crop's commonest
-# colour. The dock guarantees the marks read against it, so the cut sits well
-# above the film grain's speckle (a few levels) and well below a mark's
-# contrast (a hundred or more).
-near = [v for v in raw.values() if max(abs(a - b) for a, b in zip(v, (16, 16, 16))) <= 60] or list(raw.values())
-bg = collections.Counter(near).most_common(1)[0][0]
-ink = {p for p, v in raw.items() if max(abs(a - b) for a, b in zip(v, bg)) > 80}
+    # Row marks live in the item's bottom band (top-touching ink is icon art);
+    # column marks in the leading strip (art, plate and text start right of it).
+    # Both windows are slack, not policy reads: a window grown with the policy
+    # would follow a wrong size instead of catching it.
+    band = max(10, round(8 * scale))
+    strip = max(12, round(14 * scale))
+    cx, cy, cw, ch = (x, y + h - band, w, band) if mode == "row" else (x, y, w, h)
+    raw = {}
+    for line in out("magick", shot, "-crop", f"{cw}x{ch}+{cx}+{cy}", "+repage", "txt:-").splitlines()[1:]:
+        point, rest = line.split(":", 1)
+        px, py = (int(v) for v in point.split(","))
+        hexv = rest.split("#")[1][:6]
+        raw[(px, py)] = tuple(int(hexv[i:i + 2], 16) for i in (0, 2, 4))
+    if not raw:
+        report(f"nothing on screen at {item_id}", False)
+    # Ink differs from the crop's background well above grain speckle (a few
+    # levels) and well below a mark's contrast (a hundred or more).
+    near = [v for v in raw.values() if max(abs(a - b) for a, b in zip(v, (16, 16, 16))) <= 60] or list(raw.values())
+    bg = collections.Counter(near).most_common(1)[0][0]
+    ink = {p for p, v in raw.items() if max(abs(a - b) for a, b in zip(v, bg)) > 80}
 
-def groups(points):
-    # Diagonals count as touching: the overflow pill's "+2" is two glyphs, and
-    # they are one mark (joined below when AA splits them).
-    rest, found = set(points), []
-    while rest:
-        seed = rest.pop()
-        group, stack = {seed}, [seed]
-        while stack:
-            gx, gy = stack.pop()
-            for nb in ((gx + 1, gy), (gx - 1, gy), (gx, gy + 1), (gx, gy - 1),
-                       (gx + 1, gy + 1), (gx + 1, gy - 1),
-                       (gx - 1, gy + 1), (gx - 1, gy - 1)):
-                if nb in rest:
-                    rest.discard(nb); group.add(nb); stack.append(nb)
-        found.append(group)
-    return found
+    def groups(points):
+        # Diagonals count as touching: the overflow pill's "+2" is two glyphs, and
+        # they are one mark (joined below when AA splits them).
+        rest, found = set(points), []
+        while rest:
+            seed = rest.pop()
+            group, stack = {seed}, [seed]
+            while stack:
+                gx, gy = stack.pop()
+                for nb in ((gx + 1, gy), (gx - 1, gy), (gx, gy + 1), (gx, gy - 1),
+                           (gx + 1, gy + 1), (gx + 1, gy - 1),
+                           (gx - 1, gy + 1), (gx - 1, gy - 1)):
+                    if nb in rest:
+                        rest.discard(nb); group.add(nb); stack.append(nb)
+            found.append(group)
+        return found
 
-def box(group):
-    xs = [p[0] for p in group]
-    ys = [p[1] for p in group]
-    return min(xs), min(ys), max(xs), max(ys)
+    def box(group):
+        xs = [p[0] for p in group]
+        ys = [p[1] for p in group]
+        return min(xs), min(ys), max(xs), max(ys)
 
-def is_mark(group):
-    """A speckle of grain that survived the cut is not ink."""
-    return len(group) >= 3
+    def is_mark(group):
+        """A speckle of grain that survived the cut is not ink."""
+        return len(group) >= 3
 
-if mode == "row":
-    marks = [g for g in groups(ink) if min(p[1] for p in g) > 0 and is_mark(g)]
-else:
-    # What is a mark is decided by where the ink starts, not by how large it
-    # is: past five windows the "+N" pill's glyphs are wider than the icon's
-    # own, so the largest blob in the item is as often a mark as it is the
-    # plate, and reading one as the plate hid the marks behind it.
-    marks = [g for g in groups(ink) if is_mark(g) and min(p[0] for p in g) < strip]
+    if mode == "row":
+        marks = [g for g in groups(ink) if min(p[1] for p in g) > 0 and is_mark(g)]
+    else:
+        # What is a mark is decided by where the ink starts, not by how large it
+        # is: past five windows the "+N" pill's glyphs are wider than the icon's
+        # own, so the largest blob in the item is as often a mark as it is the
+        # plate, and reading one as the plate hid the marks behind it.
+        marks = [g for g in groups(ink) if is_mark(g) and min(p[0] for p in g) < strip]
+    if marks or attempt > 0:  # fail closed: a real miss fails twice identically
+        break
+    time.sleep(2)
 if not marks:
     report(f"no marks under {item_id} (is anything running there?)", False)
 # A split "+N" pill (two glyphs sharing one band) rejoins below.
@@ -261,10 +257,8 @@ off = (((min(xs) + max(xs) + 1) / 2 + cx) - (x + w / 2) if mode == "row"
 
 windows = item["windows"]
 expected = 5 if windows > 5 else max(1, min(windows, 5))
-# What is drawn has to be the shape this check is about: the accent bar lies
-# along the row and stands upright in a column (1.6x the dots). Past five
-# windows the count moves into the "+N" pill, which spans wider than the dots
-# rather than taller, so a column of equal squares is neither shape.
+# Shape check: the bar lies along the row, stands upright in a column; past
+# five windows the "+N" pill spans wider than the dots, never just taller.
 if mode == "row":
     shape = widths[0] > heights[0] if windows == 1 else max(widths) >= 1.8 * min(widths)
 else:

@@ -38,7 +38,7 @@ ROOT_CEILINGS = {
 # out of a suite rather than raising it.
 SHELL_CEILINGS = {
     "tests/live/presets.sh": 388,
-    "tests/live/indicators.sh": 352,
+    "tests/live/indicators.sh": 346,
     "tests/live/probe.sh": 328,
     "tests/live/place-restore.sh": 250,
     "tests/live/teardown.sh": 125,
