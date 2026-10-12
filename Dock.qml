@@ -10,6 +10,7 @@ import qs.Ui
 import "DockModel.js" as DockModel
 import "DockLabels.js" as DockLabels
 import "DockLayout.js" as DockLayout
+import "DockMotion.js" as DockMotion
 import "components"
 import "components/logic"
 
@@ -165,6 +166,7 @@ Item {
   readonly property var folderStackScannerRef: folderStackScanner
   readonly property var launchPruneTimerRef: launchPruneTimer
   readonly property var modelTimerRef: modelTimer
+  readonly property var urgentSettleTimerRef: urgentSettleTimer
   readonly property var removableDrivesScannerRef: removableDrivesScanner
   readonly property var scaleRevBumpRef: scaleRevBump
   readonly property var terminalHostDebounceRef: terminalHostDebounce
@@ -524,6 +526,7 @@ Item {
   // ipc object only carries at/size for windows that existed at shell start.
   property var clientRects: ({})
   property var urgentMap: ({})
+  property var pendingUrgent: ({}) // held by urgentSettleTimer (DockEventLogic)
   // Counts urgency events (Hyprland urgent, app notifications) so items can
   // animate again for a new event while they are already marked urgent.
   property int urgentEvents: 0
@@ -659,6 +662,7 @@ Item {
   // passes a single property.
   readonly property var hoverFx: ({
     effect: root.hoverEffect,
+    motion: root.motion,
     reveal: root.iconHoverOriginal && root.iconHoverReveal,
     glow: Color.accent
   })
@@ -893,6 +897,8 @@ Item {
   // Hyprland warps the pointer into a window it activates (and on workspace
   // switches); keepPointer suppresses that for focus changes the dock makes.
   property bool keepPointer: true
+  property string animations: "full"      // full | reduced | off (DockMotion)
+  readonly property var motion: DockMotion.plan(root.animations)
   readonly property bool clickToMinimize: root.minimizeMode !== "off"
   property bool showUrgentHint: true
   property bool urgentOnNotification: true
@@ -968,6 +974,7 @@ Item {
     interval: 40
     onTriggered: root.refreshDock()
   }
+  Timer { id: urgentSettleTimer; interval: 150; onTriggered: eventLogic.commitUrgent(root) }
 
   // Process identity survives TUI app-id overrides. Scan on window-list changes;
   // the helper bounds each descendant walk to known CLI names.
@@ -1861,25 +1868,11 @@ Item {
   // what its first press parked. Always the recorded origin.
   function restoreAddress(address) { return windowLogic.restoreWindow(root, address, "", true) }
 
-  // Recorded-place bookkeeping: the queue and the timer stay here, the logic in
+  // Recorded-place bookkeeping: the timer stays here, the logic in
   // DockSlotLogic (which other modules reach through these).
-  function scheduleSlotFix(address) {
-    if (!address) return
-    var queue = root.pendingSlotFixes ? root.pendingSlotFixes.slice() : []
-    if (queue.indexOf(address) < 0) queue.push(address)
-    root.pendingSlotFixes = queue
-    root.slotFixFocus = address
-    slotFixTimer.restart()
-  }
+  function scheduleSlotFix(address) { return slotLogic.scheduleSlotFix(root, address, slotFixTimer) }
 
-  function dropParkSlot(address) {
-    if (!address || !root.parkSlots || root.parkSlots[address] === undefined) return
-    var slots = {}
-    for (var k in root.parkSlots) slots[k] = root.parkSlots[k]
-    delete slots[address]
-    root.parkSlots = slots
-    root.pendingSlotFixes = (root.pendingSlotFixes || []).filter(function(a) { return a !== address })
-  }
+  function dropParkSlot(address) { return slotLogic.dropParkSlot(root, address) }
 
   function recordParkSlot(address, origin) { return slotLogic.recordParkSlot(root, address, origin) }
 
@@ -2281,14 +2274,14 @@ Item {
         anchors.bottom: parent.bottom
         x: Math.round((parent.width - width) / 2)
         Behavior on x {
-          NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+          NumberAnimation { duration: root.motion.slow; easing.type: Easing.OutCubic }
         }
         width: revealHover.hovered ? Style.space(48) : Style.space(24)
         height: Style.space(3)
         radius: height / 2
         color: Util.alpha(Color.bar.text, revealHover.hovered ? 0.6 : 0.25)
-        Behavior on width { NumberAnimation { duration: 150 } }
-        Behavior on color { ColorAnimation { duration: 150 } }
+        Behavior on width { NumberAnimation { duration: root.motion.fast; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motion.fast } }
       }
     }
 
@@ -2326,12 +2319,14 @@ Item {
     // ------------------------------------------------------------ Folder Stack Popover
     // Created only while open: idle popup windows cost a QQuickWindow each,
     // and several hidden ones next to the dock broke its hover handling.
+    PopupLife { id: stackLife; dockRoot: root; rivals: [groupLife, contextLife]; want: root.activeStackFolder !== "" && root.dockVisible }
     LazyLoader {
       id: folderStackLoader
-      active: root.activeStackFolder !== "" && root.dockVisible
+      active: stackLife.alive
 
       DockPopupWindow {
         id: folderStackWindow
+        life: stackLife
         dockRoot: root
         open: true
         centerX: root.activeStackX
@@ -2348,12 +2343,14 @@ Item {
     // ------------------------------------------------------------ App Group Popover
     // Created only while open: idle popup windows cost a QQuickWindow each,
     // and several hidden ones next to the dock broke its hover handling.
+    PopupLife { id: groupLife; dockRoot: root; rivals: [stackLife, contextLife]; want: root.activeAppGroupId !== "" && root.dockVisible }
     LazyLoader {
       id: appGroupLoader
-      active: root.activeAppGroupId !== "" && root.dockVisible
+      active: groupLife.alive
 
       DockPopupWindow {
         id: appGroupWindow
+        life: groupLife
         dockRoot: root
         open: true
         centerX: root.activeAppGroupX
@@ -2375,12 +2372,14 @@ Item {
     // ------------------------------------------------------------ context menu
     // Created only while open: idle popup windows cost a QQuickWindow each,
     // and several hidden ones next to the dock broke its hover handling.
+    PopupLife { id: contextLife; dockRoot: root; rivals: [stackLife, groupLife]; want: root.contextAppId !== "" }
     LazyLoader {
       id: contextMenuLoader
-      active: root.contextAppId !== ""
+      active: contextLife.alive
 
       DockPopupWindow {
         id: contextMenuWindow
+        life: contextLife
         dockRoot: root
         open: true
         centerX: root.contextX

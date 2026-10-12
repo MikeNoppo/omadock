@@ -16,6 +16,7 @@ Item {
   // monitorRev re-runs this on Hyprland's monitor events.
   readonly property bool canCapture: !!tile.root && DockOutput.outputAwake(tile.root.dockScreen ? tile.root.dockScreen.name : "",
     tile.root.dockScreen ? Hyprland.monitorFor(tile.root.dockScreen) : null, tile.root.monitorRev)
+  readonly property var motion: tile.root ? tile.root.motion : null
   property var dockCard: root ? root.dockCard : null
 
   property var tileData: typeof modelData !== "undefined" ? modelData : null
@@ -63,7 +64,7 @@ Item {
     return (tileArea.containsMouse && !tile.tileMenuOpen) ? root.zoomPeak : 1
   }
   Behavior on magnifyScale {
-    NumberAnimation { duration: 110; easing.type: Easing.OutQuad }
+    NumberAnimation { duration: (tile.motion ? tile.motion.hover : 0); easing.type: Easing.OutQuad }
   }
 
   function doRestore() {
@@ -228,6 +229,7 @@ Item {
       target: tile
       shown: true
       level: tileTooltipLife.level
+      rises: tileTooltipLife.rises
       body: tileTooltipSurface
 
       BorderSurface {

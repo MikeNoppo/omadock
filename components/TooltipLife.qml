@@ -13,7 +13,9 @@ Item {
   property var dockRoot: null
   property bool want: false
   property int hideDelay: 200
-  property int fadeMs: 120
+  property int fadeMs: dockRoot ? dockRoot.motion.fast : 120
+  // Whether the tooltip lifts as it fades in (Full only), for TooltipWindow.
+  readonly property bool rises: dockRoot ? dockRoot.motion.rise : true
 
   property bool alive: false
   // 0 = hidden, 1 = shown; drives opacity and the small rise.

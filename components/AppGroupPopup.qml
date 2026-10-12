@@ -9,6 +9,7 @@ BorderSurface {
 
   property var rootRef: null
   readonly property var root: rootRef
+  readonly property var motion: appGroupPopup.root ? appGroupPopup.root.motion : null
   // The DockPopupWindow hosting this popup; maps drag positions to the dock.
   property var popupWindow: null
 
@@ -16,8 +17,6 @@ BorderSurface {
   readonly property var appList: (activeGroup && DockModel.isList(activeGroup.apps)) ? DockModel.toArray(activeGroup.apps) : []
 
   visible: root ? (root.activeAppGroupId !== "" && root.dockVisible) : false
-  opacity: (root && root.activeAppGroupId !== "" && root.dockVisible) ? 1 : 0
-  Behavior on opacity { NumberAnimation { duration: 120 } }
 
   z: 100
   color: Color.menu.background
@@ -193,8 +192,8 @@ BorderSurface {
             radius: Style.cornerRadius
             color: cellHover.hovered ? Util.alpha(Color.menu.text, 0.08) : "transparent"
             opacity: cellItem.isDragging ? 0.35 : 1.0
-            Behavior on color { ColorAnimation { duration: 100 } }
-            Behavior on opacity { NumberAnimation { duration: 100 } }
+            Behavior on color { ColorAnimation { duration: (appGroupPopup.motion ? appGroupPopup.motion.fast : 0) } }
+            Behavior on opacity { NumberAnimation { duration: (appGroupPopup.motion ? appGroupPopup.motion.fast : 0) } }
 
             Column {
               anchors.centerIn: parent
