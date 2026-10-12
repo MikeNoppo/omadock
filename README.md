@@ -751,6 +751,12 @@ The pixel label font is [Silkscreen](https://fonts.google.com/specimen/Silkscree
 
 Full release notes, historical changelogs, and upgrade guides across all versions are available on [**GitHub Releases**](https://github.com/thepathless/omadock/releases).
 
+### v4.5.0 — 2026-10-12
+
+- **Eight contributor PRs from [@priard](https://github.com/priard) (#58–#65), all landed as real merges so the contributor commits survive.** **#59** items, popups and marks ease in and out, with an Animations Full / Reduced / Off setting. **#64** the dock always fits its screen: labels shorten and fold, spacing and icons tighten, overflow goes to a `»` tile that shows the hidden items' windows, urgency and badges. **#60** plates fit a pill dock's ends, real pill plates and drive plates. **#63** pinned apps can show their name only while running. **#61** the name shortening defers through a child Timer. **#62** the Both sides gap never shrinks to nothing. **#58** no window captures while the dock's output is gone. **#65** drives take Yaru's device artwork before the icon index. Maintainer fixes on top: pinned web apps no longer match an unrelated app when another app's `Icon=` is an absolute path (issue #66, reported by [@murdialthaf](https://github.com/murdialthaf) — only the icon file name takes part in matching, pinned by a both-row-orders regression test), the group rename field builds only while editing (mirroring v4.4.2), urgent events wait for focus, and window marks re-snap once their cell settles.
+- **The marks-centering live suite measures the card again.** `tests/live/indicators.sh` read its background as the crop's commonest colour, so foot's busy icon art (accent-near salmon, this theme's own accent) elected itself the modal and hid the drawn bar, and the `+N` pill's two glyphs can land a few px apart and count as two marks. The modal is anchored at the flat card colour the suite sets, and a sixth group sharing the pill's band rejoins its twin; verified `INDICATORS PASSED` 3× at 0.0 px on every shape. Line-neutral under the suite's 352-line ratchet.
+- Verified: 239 node + 116 python tests, `node --check` ×8, `qmllint` 0 errors, structure-check PASSED, security-grep 0, `omarchy plugin validate` 0, manifest-check 0, smoke PASSED, all nine live suites green on a live shell (2 jiffies / 6 s idle).
+
 ### v4.4.2 — 2026-10-11
 
 - **The Rename field is built when you rename, not when the menu opens.** A
