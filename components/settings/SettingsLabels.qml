@@ -59,6 +59,18 @@ Column {
       value: root ? root.labelKind : "all"
       onPicked: function(v) { root.setOption("labelKind", v) }
     }
+    ChoiceRow {
+      key: "labelPinned"
+      label: "Pinned apps"
+      hint: "When running shows a pinned app's name only while it has a window; a closed one keeps just its icon."
+      visible: root ? (root.labelMode === "always" && (root.labelKind === "all" || root.labelKind === "apps")) : false
+      options: [
+        { value: "always", label: "Always" },
+        { value: "running", label: "When running" }
+      ]
+      value: root ? root.labelPinned : "always"
+      onPicked: function(v) { root.setOption("labelPinned", v) }
+    }
 
     SectionLabel { text: "Look" }
 
@@ -124,11 +136,10 @@ Column {
     ChoiceRow {
       key: "labelShape"
       label: "Corners"
-      hint: "Dock follows the dock's own corners. Nested squares plates off against each other and rounds the outer ones along the dock's edge."
+      hint: "Dock follows the dock's own corners. Square meets between plates and rounds the outer ones along the dock's edge; Pill gives every plate round ends."
       visible: root ? (root.labelBackground !== "none" || root.labelMode === "hover") : true
       options: [
         { value: "dock", label: "Dock" },
-        { value: "nested", label: "Nested" },
         { value: "pill", label: "Pill" },
         { value: "rounded", label: "Rounded" },
         { value: "square", label: "Square" }

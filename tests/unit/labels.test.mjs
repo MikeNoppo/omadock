@@ -140,8 +140,24 @@ test("readLabelConfig defaults", () => {
   assert.deepEqual(plain(L.readLabelConfig(null)), {
     labelMode: "off", labelKind: "all", labelFont: "theme", labelSize: "medium",
     labelWeight: "medium", labelColor: "auto", labelBackground: "none", labelShape: "dock",
-    labelIndicators: "before", labelPlateHeight: "icon", labelReveal: "slide", labelEffect: "none", labelMaxWidth: 140, labelNames: {}
+    labelIndicators: "before", labelPlateHeight: "icon", labelPinned: "always", labelReveal: "slide", labelEffect: "none", labelMaxWidth: 140, labelNames: {}
   })
+})
+
+test("readLabelConfig keeps a known labelPinned and defaults the rest", () => {
+  assert.equal(L.readLabelConfig({ labelPinned: "running" }).labelPinned, "running")
+  assert.equal(L.readLabelConfig({ labelPinned: "never" }).labelPinned, "always")
+  assert.equal(L.pickLabelLook({ labelPinned: "running" }, { labelPinned: "always" }).labelPinned, "running")
+  assert.equal(L.pickLabelLook({}, { labelPinned: "running" }).labelPinned, "running")
+})
+
+test("nameFolded only for a sleeping pinned app with always-on names set to running", () => {
+  assert.equal(L.nameFolded("always", "running", true, false), true)
+  assert.equal(L.nameFolded("always", "running", true, true), false)
+  assert.equal(L.nameFolded("always", "running", false, false), false)
+  assert.equal(L.nameFolded("always", "always", true, false), false)
+  assert.equal(L.nameFolded("hover", "running", true, false), false)
+  assert.equal(L.nameFolded("off", "running", true, false), false)
 })
 
 test("readLabelConfig migrates upstream's first label keys", () => {
@@ -224,7 +240,7 @@ test("homeExtra counts the part of a slot's own extra that sits before its icon"
 
 test("pickLabelLook applies a preset's label look and keeps the rest", () => {
   const cur = { labelMode: "always", labelKind: "all", labelFont: "theme", labelSize: "small", labelWeight: "medium", labelColor: "auto",
-    labelBackground: "none", labelShape: "dock", labelIndicators: "before", labelPlateHeight: "icon", labelReveal: "slide", labelEffect: "none", labelMaxWidth: 140 }
+    labelBackground: "none", labelShape: "dock", labelIndicators: "before", labelPlateHeight: "icon", labelPinned: "always", labelReveal: "slide", labelEffect: "none", labelMaxWidth: 140 }
   const out = plain(L.pickLabelLook({ labelFont: "pixel", labelBackground: "plate", labelMaxWidth: 999, labelShape: "blob", iconSize: 40 }, cur))
   assert.deepEqual(out, Object.assign({}, cur, { labelFont: "pixel", labelBackground: "plate", labelMaxWidth: 240 }))
   // A preset saved before label looks existed changes nothing.
@@ -381,30 +397,90 @@ test("plateEdges: empty row and a cut before the first item", () => {
   assert.deepEqual(plain(L.plateEdges([{ n: 1, labelled: true, cut: true }])), [{ left: true, right: true }])
 })
 
-test("plateCorners: any shape but nested rounds all four corners alike", () => {
+test("plateCorners: dock, pill and rounded round all four corners alike when they fit", () => {
   assert.deepEqual(plain(L.plateCorners("dock", 40, 6, 9, { left: true, right: false })), { tl: 6, tr: 6, bl: 6, br: 6 })
   assert.deepEqual(plain(L.plateCorners("pill", 40, 12.8, 9, null)), { tl: 12.8, tr: 12.8, bl: 12.8, br: 12.8 })
 })
 
-test("plateCorners: nested without edges (pill, hover) looks like dock", () => {
-  assert.deepEqual(plain(L.plateCorners("nested", 40, 6, 9, null)), { tl: 6, tr: 6, bl: 6, br: 6 })
-  assert.deepEqual(plain(L.plateCorners("nested", 40, 6, 9, undefined)), { tl: 6, tr: 6, bl: 6, br: 6 })
+test("plateCorners: without edges (pills, hover labels) every shape keeps its radius", () => {
+  assert.deepEqual(plain(L.plateCorners("square", 40, 6, 9, null)), { tl: 6, tr: 6, bl: 6, br: 6 })
+  assert.deepEqual(plain(L.plateCorners("square", 40, 6, 9, undefined)), { tl: 6, tr: 6, bl: 6, br: 6 })
 })
 
-test("plateCorners: nested squares inner corners and rounds the edge side", () => {
-  assert.deepEqual(plain(L.plateCorners("nested", 40, 6, 9, { left: false, right: false })), { tl: 0, tr: 0, bl: 0, br: 0 })
-  assert.deepEqual(plain(L.plateCorners("nested", 40, 6, 9, { left: true, right: false })), { tl: 9, tr: 0, bl: 9, br: 0 })
-  assert.deepEqual(plain(L.plateCorners("nested", 40, 6, 9, { left: false, right: true })), { tl: 0, tr: 9, bl: 0, br: 9 })
-  assert.deepEqual(plain(L.plateCorners("nested", 40, 6, 9, { left: true, right: true })), { tl: 9, tr: 9, bl: 9, br: 9 })
+test("plateCorners: square squares inner corners and rounds the edge side", () => {
+  assert.deepEqual(plain(L.plateCorners("square", 40, 6, 9, { left: false, right: false })), { tl: 0, tr: 0, bl: 0, br: 0 })
+  assert.deepEqual(plain(L.plateCorners("square", 40, 6, 9, { left: true, right: false })), { tl: 9, tr: 0, bl: 9, br: 0 })
+  assert.deepEqual(plain(L.plateCorners("square", 40, 6, 9, { left: false, right: true })), { tl: 0, tr: 9, bl: 0, br: 9 })
+  assert.deepEqual(plain(L.plateCorners("square", 40, 6, 9, { left: true, right: true })), { tl: 9, tr: 9, bl: 9, br: 9 })
 })
 
-test("plateCorners: nested outer radius stops at a pill end and never goes negative", () => {
+test("plateCorners: square edge radius stops at a pill end and never goes negative", () => {
   // Pill dock 72 high, gap 6: R - gap = 30 = half of a 60 px plate, not the 0.32 h cap.
-  assert.deepEqual(plain(L.plateCorners("nested", 60, 19.2, 30, { left: true, right: false })), { tl: 30, tr: 0, bl: 30, br: 0 })
-  assert.equal(L.plateCorners("nested", 40, 6, 50, { left: true, right: false }).tl, 20)
-  assert.equal(L.plateCorners("nested", 40, 6, -3, { left: true, right: false }).tl, 0)
+  assert.deepEqual(plain(L.plateCorners("square", 60, 19.2, 30, { left: true, right: false })), { tl: 30, tr: 0, bl: 30, br: 0 })
+  assert.equal(L.plateCorners("square", 40, 6, 50, { left: true, right: false }).tl, 20)
+  assert.equal(L.plateCorners("square", 40, 6, -3, { left: true, right: false }).tl, 0)
 })
 
-test("readLabelConfig accepts the nested corners", () => {
-  assert.equal(L.readLabelConfig({ labelMode: "always", labelShape: "nested" }).labelShape, "nested")
+test("plateFitRadius: the smallest edge corner that stays inside the panel's curve", () => {
+  // A corner of radius r, g in from a curve of radius R, fits once r >= R - g*sqrt2/(sqrt2-1).
+  assert.ok(Math.abs(L.plateFitRadius(36, 6) - (36 - 6 * Math.SQRT2 / (Math.SQRT2 - 1))) < 1e-9)
+  assert.equal(L.plateFitRadius(16, 6), 0)    // a rounded dock: even a square corner fits
+  assert.equal(L.plateFitRadius(0, 6), 0)     // square dock, panel
+})
+
+test("plateCorners: a chosen corner that would stick out of the panel's curve rounds with it", () => {
+  // Pill dock, R 36, gap 6: square plates would poke out at the ends; the edge side takes the
+  // nested radius (30, parallel to the curve), the inner side keeps the choice.
+  const fit = L.plateFitRadius(36, 6)
+  assert.deepEqual(plain(L.plateCorners("square", 60, 0, 30, { left: true, right: false }, fit)), { tl: 30, tr: 0, bl: 30, br: 0 })
+  assert.deepEqual(plain(L.plateCorners("rounded", 60, 15, 30, { left: false, right: true }, fit)), { tl: 15, tr: 30, bl: 15, br: 30 })
+  // A choice that already fits stays as chosen, on every side.
+  assert.deepEqual(plain(L.plateCorners("dock", 60, 19.2, 30, { left: true, right: true }, fit)), { tl: 19.2, tr: 19.2, bl: 19.2, br: 19.2 })
+  // A rounded dock: square plates still round their ends with the dock's corners.
+  assert.deepEqual(plain(L.plateCorners("square", 40, 0, 10, { left: true, right: true }, L.plateFitRadius(16, 6))), { tl: 10, tr: 10, bl: 10, br: 10 })
+  // Inside the row (no edge) and without edges (pills, hover): the choice.
+  assert.deepEqual(plain(L.plateCorners("square", 60, 0, 30, { left: false, right: false }, fit)), { tl: 0, tr: 0, bl: 0, br: 0 })
+  assert.deepEqual(plain(L.plateCorners("square", 60, 0, 30, null, fit)), { tl: 0, tr: 0, bl: 0, br: 0 })
+  // Never past a pill end.
+  assert.equal(L.plateCorners("square", 40, 0, 30, { left: true, right: false }, fit).tl, 20)
+})
+
+test("pillRoom: how far in a pill end's curve reaches at a given half height", () => {
+  // Radius 25: at 17 px off the centre line the curve is 25 - sqrt(625 - 289) in.
+  assert.ok(Math.abs(L.pillRoom(25, 17) - (25 - Math.sqrt(625 - 289))) < 1e-9)
+  assert.equal(L.pillRoom(25, 0), 0)
+  assert.equal(L.pillRoom(25, 30), 25)   // taller than the plate: the whole radius
+  assert.equal(L.pillRoom(0, 5), 0)
+})
+
+test("square corners: square between plates, the ends round with the panel", () => {
+  // What Nested used to do: an edge side takes the panel's radius less the gap.
+  assert.deepEqual(plain(L.plateCorners("square", 40, 0, 9, { left: true, right: false }, 0)), { tl: 9, tr: 0, bl: 9, br: 0 })
+  assert.deepEqual(plain(L.plateCorners("square", 40, 0, 9, { left: false, right: false }, 0)), { tl: 0, tr: 0, bl: 0, br: 0 })
+  assert.deepEqual(plain(L.plateCorners("square", 40, 0, 9, null, 0)), { tl: 0, tr: 0, bl: 0, br: 0 })
+})
+
+test("a stored nested corner reads as square, in the config and in presets", () => {
+  assert.equal(L.readLabelConfig({ labelMode: "always", labelShape: "nested" }).labelShape, "square")
+  const look = plain(L.pickLabelLook({ labelShape: "nested" }, { labelShape: "dock" }))
+  assert.equal(look.labelShape, "square")
+})
+
+test("plateEdges: drives with plates of their own take the edge after the folders", () => {
+  // button, 2 pinned, 1 folder, 1 drive: the drive is the last plate, at the right edge.
+  const e = plain(L.plateEdges([
+    { n: 1, labelled: true, cut: false }, { n: 2, labelled: true, cut: false },
+    { n: 0, labelled: false, cut: false }, { n: 0, labelled: true, cut: false },
+    { n: 1, labelled: true, cut: false }, { n: 1, labelled: true, cut: false }]))
+  assert.equal(e.length, 5)
+  assert.deepEqual(e[3], { left: false, right: false })
+  assert.deepEqual(e[4], { left: false, right: true })
+})
+
+test("withNatural keeps one entry per slot and only its owner clears it", () => {
+  let m = L.withNatural({}, 3, "a", { text: 50, inner: 20, outer: 24, folded: 0 })
+  assert.deepEqual(plain(m), { 3: { owner: "a", text: 50, inner: 20, outer: 24, folded: 0 } })
+  assert.equal(L.withNatural(m, 3, "a", { text: 50, inner: 20, outer: 24, folded: 0 }), m)
+  assert.equal(L.withNatural(m, 3, "b", null), m)
+  assert.deepEqual(plain(L.withNatural(m, 3, "a", null)), {})
 })

@@ -789,7 +789,7 @@ var DEFAULT_LOOK = {
   iconGrid: 16, indicatorShape: "theme", hoverEffect: "zoom", launchBounce: true, groupStyle: "rounded",
   groupIconEffects: "theme", folderColor: "theme", iconSize: 0, itemSpacing: 4, sectionSpacing: 18, labelMode: "off",
   labelKind: "all", labelFont: "theme", labelSize: "medium", labelColor: "auto", labelBackground: "none", labelReveal: "slide",
-  labelEffect: "none", labelMaxWidth: 140, labelWeight: "medium", labelShape: "dock", labelIndicators: "before", labelPlateHeight: "icon"
+  labelEffect: "none", labelMaxWidth: 140, labelWeight: "medium", labelShape: "dock", labelIndicators: "before", labelPlateHeight: "icon", labelPinned: "always"
 }
 var LOOK_KEYS = Object.keys(DEFAULT_LOOK)
 var MAX_PRESETS = 6
@@ -973,7 +973,7 @@ function entryFor(appRows, appId) {
     if (!entry) continue
     var entryCands = getCandidates(entry.id)
       .concat(getCandidates(entry.name))
-      .concat(getCandidates(entry.icon))
+      .concat(getCandidates(String(entry.icon || "").replace(/^.*\//, "")))
     for (var k = 0; k < wantCands.length; k++) {
       var cand = wantCands[k]
       if (entryCands.indexOf(cand) >= 0) return entry

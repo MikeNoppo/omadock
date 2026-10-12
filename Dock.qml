@@ -10,6 +10,7 @@ import qs.Ui
 import "DockModel.js" as DockModel
 import "DockLabels.js" as DockLabels
 import "DockLayout.js" as DockLayout
+import "DockMotion.js" as DockMotion
 import "components"
 import "components/logic"
 
@@ -165,6 +166,7 @@ Item {
   readonly property var folderStackScannerRef: folderStackScanner
   readonly property var launchPruneTimerRef: launchPruneTimer
   readonly property var modelTimerRef: modelTimer
+  readonly property var urgentSettleTimerRef: urgentSettleTimer
   readonly property var removableDrivesScannerRef: removableDrivesScanner
   readonly property var scaleRevBumpRef: scaleRevBump
   readonly property var terminalHostDebounceRef: terminalHostDebounce
@@ -198,6 +200,8 @@ Item {
   DockPersistLogic { id: persistLogic }
   DockGroupCycleLogic { id: groupCycleLogic }
   DockLabelLogic { id: labelLogic }
+  DockFitHost { id: fitHost; dockRoot: root; rivals: [stackLife, groupLife, contextLife] }
+  readonly property var fitHostRef: fitHost
 
   // Fallback standalone application library for host capability gates (e.g. Omarchy 4.x scoped plugins)
 
@@ -303,11 +307,11 @@ Item {
   // Pinned-group | running divider. Sits after the tile section when tiles
   // exist, so it doubles as the right tile divider.
   readonly property bool hasSeparator: (root.pinnedSection.length > 0 || root.hasTiles) && root.visibleRunningCount > 0
-  readonly property real gapWidth: root.labelPlates ? root.plateSpacing.gap : Style.space(root.itemSpacing)
+  readonly property real gapWidth: fitHost.plan.t < 1 ? fitHost.plan.gap : (root.labelPlates ? root.plateSpacing.gap : Style.space(root.itemSpacing))
   // Split sections turn each separator into the gap between two panels. Each
   // panel reaches the card padding past its outer icons, so the separator
   // slot is sized to leave the chosen visible gap between the panels.
-  readonly property real sectionGap: Style.space(root.sectionSpacing)
+  readonly property real sectionGap: Style.space(root.sectionSpacing) * Math.min(1, fitHost.plan.t)
   // Without the split, a divider's slot gets half the margin an icon has
   // inside its own slot on each side. Squeezed against its neighbours, the
   // line made every difference in icon width show; with the full margin it
@@ -418,9 +422,8 @@ Item {
   // ------------------------------------------------- sizing
 
   property int configuredIconSize: 0
-  readonly property int iconSize: root.configuredIconSize > 0
-    ? root.configuredIconSize
-    : Math.max(28, Math.round(Style.bar.sizeHorizontal * 0.9))
+  readonly property int baseIconSize: root.configuredIconSize > 0 ? root.configuredIconSize : Math.max(28, Math.round(Style.bar.sizeHorizontal * 0.9))
+  readonly property int iconSize: fitHost.plan.iconSize > 0 ? Math.min(root.baseIconSize, fitHost.plan.iconSize) : root.baseIconSize
   readonly property int iconSlot: root.labelPlates ? DockLabels.gridInt(root.iconSize + Style.space(10), root.outputScale) : root.iconSize + Style.space(10)
 
   // ------------------------------------------------- model
@@ -524,6 +527,7 @@ Item {
   // ipc object only carries at/size for windows that existed at shell start.
   property var clientRects: ({})
   property var urgentMap: ({})
+  property var pendingUrgent: ({}) // held by urgentSettleTimer (DockEventLogic)
   // Counts urgency events (Hyprland urgent, app notifications) so items can
   // animate again for a new event while they are already marked urgent.
   property int urgentEvents: 0
@@ -659,6 +663,7 @@ Item {
   // passes a single property.
   readonly property var hoverFx: ({
     effect: root.hoverEffect,
+    motion: root.motion,
     reveal: root.iconHoverOriginal && root.iconHoverReveal,
     glow: Color.accent
   })
@@ -702,37 +707,7 @@ Item {
   // palette colours (colors.toml) that sit furthest enough in hue from the
   // accent and from each other, so the gradient never collapses into one
   // hue. Falls back to the accent alone when the theme names no colours.
-  readonly property var themeGradientColors: {
-    var _tv = root.themeVersion
-    var text = ""
-    try {
-      text = DockModel.readCapped(themeColorsFile.text, DockModel.MAX_COLORS_TOML_BYTES)
-    } catch (e) {
-      console.warn("[omadock] Failed reading theme colors:", e)
-    }
-    var named = {}
-    var re = /^\s*([a-z_]+)\s*=\s*"(#[0-9a-fA-F]{6})"/gm
-    var m
-    while ((m = re.exec(text)) !== null) named[m[1]] = m[2]
-    var accent = named.accent || String(Color.accent)
-    var picked = [accent]
-    var order = ["magenta", "blue", "cyan", "red", "green", "orange", "yellow"]
-    function hueGap(a, b) {
-      var ha = Qt.color(a).hslHue, hb = Qt.color(b).hslHue
-      if (ha < 0 || hb < 0) return 1
-      var d = Math.abs(ha - hb)
-      return Math.min(d, 1 - d)
-    }
-    for (var i = 0; i < order.length && picked.length < 3; i++) {
-      var c = named[order[i]]
-      if (!c) continue
-      var ok = true
-      for (var j = 0; j < picked.length; j++) if (hueGap(c, picked[j]) < 0.07) ok = false
-      if (ok) picked.push(c)
-    }
-    while (picked.length < 3) picked.push(accent)
-    return picked
-  }
+  readonly property var themeGradientColors: styleLogic.themeGradientColors(root, themeColorsFile.text)
 
   readonly property var gradientColors: {
     if (root.gradientPreset !== "theme") {
@@ -893,6 +868,8 @@ Item {
   // Hyprland warps the pointer into a window it activates (and on workspace
   // switches); keepPointer suppresses that for focus changes the dock makes.
   property bool keepPointer: true
+  property string animations: "full"      // full | reduced | off (DockMotion)
+  readonly property var motion: DockMotion.plan(root.animations)
   readonly property bool clickToMinimize: root.minimizeMode !== "off"
   property bool showUrgentHint: true
   property bool urgentOnNotification: true
@@ -907,6 +884,7 @@ Item {
   property string labelShape: "dock"      // dock | pill | rounded | square
   property string labelIndicators: "before" // before | after | under (always-on plates)
   property string labelPlateHeight: "icon"  // icon | dock (always-on plates)
+  property string labelPinned: "always"     // always | running (always-on names of pinned apps)
   readonly property bool labelPlates: root.labelMode === "always" && root.labelBackground === "plate"
   readonly property var plateSpacing: labelLogic.plateSpacing(root)
   readonly property bool labelSideMarks: DockLabels.sideMarks(root.labelMode, root.labelBackground, root.labelIndicators)
@@ -968,6 +946,7 @@ Item {
     interval: 40
     onTriggered: root.refreshDock()
   }
+  Timer { id: urgentSettleTimer; interval: 150; onTriggered: eventLogic.commitUrgent(root) }
 
   // Process identity survives TUI app-id overrides. Scan on window-list changes;
   // the helper bounds each descendant walk to known CLI names.
@@ -1861,25 +1840,11 @@ Item {
   // what its first press parked. Always the recorded origin.
   function restoreAddress(address) { return windowLogic.restoreWindow(root, address, "", true) }
 
-  // Recorded-place bookkeeping: the queue and the timer stay here, the logic in
+  // Recorded-place bookkeeping: the timer stays here, the logic in
   // DockSlotLogic (which other modules reach through these).
-  function scheduleSlotFix(address) {
-    if (!address) return
-    var queue = root.pendingSlotFixes ? root.pendingSlotFixes.slice() : []
-    if (queue.indexOf(address) < 0) queue.push(address)
-    root.pendingSlotFixes = queue
-    root.slotFixFocus = address
-    slotFixTimer.restart()
-  }
+  function scheduleSlotFix(address) { return slotLogic.scheduleSlotFix(root, address, slotFixTimer) }
 
-  function dropParkSlot(address) {
-    if (!address || !root.parkSlots || root.parkSlots[address] === undefined) return
-    var slots = {}
-    for (var k in root.parkSlots) slots[k] = root.parkSlots[k]
-    delete slots[address]
-    root.parkSlots = slots
-    root.pendingSlotFixes = (root.pendingSlotFixes || []).filter(function(a) { return a !== address })
-  }
+  function dropParkSlot(address) { return slotLogic.dropParkSlot(root, address) }
 
   function recordParkSlot(address, origin) { return slotLogic.recordParkSlot(root, address, origin) }
 
@@ -2281,14 +2246,14 @@ Item {
         anchors.bottom: parent.bottom
         x: Math.round((parent.width - width) / 2)
         Behavior on x {
-          NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+          NumberAnimation { duration: root.motion.slow; easing.type: Easing.OutCubic }
         }
         width: revealHover.hovered ? Style.space(48) : Style.space(24)
         height: Style.space(3)
         radius: height / 2
         color: Util.alpha(Color.bar.text, revealHover.hovered ? 0.6 : 0.25)
-        Behavior on width { NumberAnimation { duration: 150 } }
-        Behavior on color { ColorAnimation { duration: 150 } }
+        Behavior on width { NumberAnimation { duration: root.motion.fast; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: root.motion.fast } }
       }
     }
 
@@ -2326,12 +2291,14 @@ Item {
     // ------------------------------------------------------------ Folder Stack Popover
     // Created only while open: idle popup windows cost a QQuickWindow each,
     // and several hidden ones next to the dock broke its hover handling.
+    PopupLife { id: stackLife; dockRoot: root; rivals: [groupLife, contextLife, fitHost.overflowLife]; want: root.activeStackFolder !== "" && root.dockVisible }
     LazyLoader {
       id: folderStackLoader
-      active: root.activeStackFolder !== "" && root.dockVisible
+      active: stackLife.alive
 
       DockPopupWindow {
         id: folderStackWindow
+        life: stackLife
         dockRoot: root
         open: true
         centerX: root.activeStackX
@@ -2348,12 +2315,14 @@ Item {
     // ------------------------------------------------------------ App Group Popover
     // Created only while open: idle popup windows cost a QQuickWindow each,
     // and several hidden ones next to the dock broke its hover handling.
+    PopupLife { id: groupLife; dockRoot: root; rivals: [stackLife, contextLife, fitHost.overflowLife]; want: root.activeAppGroupId !== "" && root.dockVisible }
     LazyLoader {
       id: appGroupLoader
-      active: root.activeAppGroupId !== "" && root.dockVisible
+      active: groupLife.alive
 
       DockPopupWindow {
         id: appGroupWindow
+        life: groupLife
         dockRoot: root
         open: true
         centerX: root.activeAppGroupX
@@ -2375,12 +2344,14 @@ Item {
     // ------------------------------------------------------------ context menu
     // Created only while open: idle popup windows cost a QQuickWindow each,
     // and several hidden ones next to the dock broke its hover handling.
+    PopupLife { id: contextLife; dockRoot: root; rivals: [stackLife, groupLife, fitHost.overflowLife]; want: root.contextAppId !== "" }
     LazyLoader {
       id: contextMenuLoader
-      active: root.contextAppId !== ""
+      active: contextLife.alive
 
       DockPopupWindow {
         id: contextMenuWindow
+        life: contextLife
         dockRoot: root
         open: true
         centerX: root.contextX

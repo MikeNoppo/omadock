@@ -9,6 +9,7 @@ BorderSurface {
 
   property var rootRef: null
   readonly property var root: rootRef
+  readonly property var motion: appGroupPopup.root ? appGroupPopup.root.motion : null
   // The DockPopupWindow hosting this popup; maps drag positions to the dock.
   property var popupWindow: null
 
@@ -16,8 +17,6 @@ BorderSurface {
   readonly property var appList: (activeGroup && DockModel.isList(activeGroup.apps)) ? DockModel.toArray(activeGroup.apps) : []
 
   visible: root ? (root.activeAppGroupId !== "" && root.dockVisible) : false
-  opacity: (root && root.activeAppGroupId !== "" && root.dockVisible) ? 1 : 0
-  Behavior on opacity { NumberAnimation { duration: 120 } }
 
   z: 100
   color: Color.menu.background
@@ -91,17 +90,12 @@ BorderSurface {
         anchors.fill: titleRow
         visible: !appGroupPopup.isEditingName
         cursorShape: Qt.PointingHandCursor
-        onClicked: {
-          appGroupPopup.isEditingName = true
-          nameInput.text = titleLabel.text
-          Qt.callLater(function() {
-            nameInput.forceActiveFocus()
-            nameInput.selectAll()
-          })
-        }
+        onClicked: appGroupPopup.isEditingName = true
       }
 
-      // Inline Name Input
+      // Inline Name Input. The TextInput is built only while renaming: a field
+      // that is merely displayed takes Qt's clipboard subscription (see
+      // ContextRenameRow.qml), so an open group popup must not hold one.
       Rectangle {
         visible: appGroupPopup.isEditingName
         anchors.left: parent.left
@@ -113,23 +107,35 @@ BorderSurface {
         border.color: Color.accent
         border.width: 1
 
-        TextInput {
-          id: nameInput
+        Loader {
           anchors.fill: parent
           anchors.margins: Style.space(4)
-          color: Color.menu.text
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          verticalAlignment: TextInput.AlignVCenter
-          selectByMouse: true
-          onAccepted: {
-            if (root && appGroupPopup.activeGroup && text.trim() !== "") {
-              root.renameAppGroup(appGroupPopup.activeGroup.id, text.trim())
-            }
-            appGroupPopup.isEditingName = false
+          active: appGroupPopup.isEditingName
+          onLoaded: {
+            item.text = titleLabel.text
+            Qt.callLater(function() {
+              if (!item) return
+              item.forceActiveFocus()
+              item.selectAll()
+            })
           }
-          Keys.onEscapePressed: {
-            appGroupPopup.isEditingName = false
+          sourceComponent: Component {
+            TextInput {
+              color: Color.menu.text
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              verticalAlignment: TextInput.AlignVCenter
+              selectByMouse: true
+              onAccepted: {
+                if (root && appGroupPopup.activeGroup && text.trim() !== "") {
+                  root.renameAppGroup(appGroupPopup.activeGroup.id, text.trim())
+                }
+                appGroupPopup.isEditingName = false
+              }
+              Keys.onEscapePressed: {
+                appGroupPopup.isEditingName = false
+              }
+            }
           }
         }
       }
@@ -186,8 +192,8 @@ BorderSurface {
             radius: Style.cornerRadius
             color: cellHover.hovered ? Util.alpha(Color.menu.text, 0.08) : "transparent"
             opacity: cellItem.isDragging ? 0.35 : 1.0
-            Behavior on color { ColorAnimation { duration: 100 } }
-            Behavior on opacity { NumberAnimation { duration: 100 } }
+            Behavior on color { ColorAnimation { duration: (appGroupPopup.motion ? appGroupPopup.motion.fast : 0) } }
+            Behavior on opacity { NumberAnimation { duration: (appGroupPopup.motion ? appGroupPopup.motion.fast : 0) } }
 
             Column {
               anchors.centerIn: parent

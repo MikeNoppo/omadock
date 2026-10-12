@@ -215,6 +215,7 @@ Flexible screen placement tailored to your workflow:
 - **`"center"`, `"left"`, `"right"`, `"spread"`** along the bottom edge, with smooth cubic transitions. `"spread"` (Both sides) keeps the apps at the left edge and puts folders and drives at the right; it needs the panel layout or Split sections.
 - **Panel layout** (`"layout": "panel"`): a full-width bar on the bottom edge with square corners; alignment moves the icons inside it.
 - **Popovers, tooltips, and menus** self-reposition so nothing clips at screen edges.
+- **Always fits the screen**: a dock that would be wider than its monitor makes room on its own, in this order: shorter labels, labels folded to their icons (closed pinned apps first), tighter spacing, smaller icons (down to half their size). Only then do items at the end of the row move into a **»** tile, which opens them in a popup (click and right click work as on the dock).
 
 #### 🖥️ Multi-Monitor Docks
 
@@ -328,7 +329,7 @@ The settings at a glance:
 - **Labels**: `Off`, `Always` or `On hover`; **Show on**: `All`, `Apps`, `App groups` or `Folders`.
 - **Font**: the theme font, `Sans`, or `Pixel` (bundled Silkscreen); **Size** and **Weight**.
 - **Color**: `Auto` (black or white for whatever is behind the icons, gradients included), `Theme` or `Accent`. A name without a background gets a faint outline so it reads on any fill.
-- **Background** (always-on labels): none, a `Pill` behind the name, or a `Plate` that joins icon and name like a button; **Corners**: `Dock` (follows the dock's own corners), `Nested` (square between plates, the outer ones rounded along the dock's edge), `Pill`, `Rounded` or `Square`. With always-on plates, **Indicators** move the window marks into an upright column `Before icon` or `After name`, so every plate is the same height whatever runs (`Under icon` keeps them below). **Plate height** `Dock` stretches plates to the dock's top and bottom; with plates on, the gap between plates, to the dock's edges and to a divider is one and the same; with split sections every section keeps that gap to its own edges.
+- **Background** (always-on labels): none, a `Pill` behind the name, or a `Plate` that joins icon and name like a button; **Corners**: `Dock` (follows the dock's own corners), `Pill` (round ends on every plate, with room so the curve keeps off the icon and the name), `Rounded` or `Square` (square between plates, the outer ones rounded along the dock's edge); whatever the choice, a plate at the end of a strongly rounded dock (a pill) rounds with that end instead of poking out of it. With always-on plates, **Indicators** move the window marks into an upright column `Before icon` or `After name`, so every plate is the same height whatever runs (`Under icon` keeps them below). **Plate height** `Dock` stretches plates to the dock's top and bottom; with plates on, the gap between plates, to the dock's edges and to a divider is one and the same; with split sections every section keeps that gap to its own edges.
 - **Reveal**: `Slide`, `Typewriter` or `Scramble`; **Effect**: `Glow` or `Outline`. Lift, glow and glitch hover effects carry the name along with the icon.
 - **Max width**: long names drop a subtitle ("Signal - Private Messenger" → "Signal"), then trailing words, and only then end in an ellipsis. Apps without a desktop entry get a readable name instead of their class id.
 - **Rename…** in the right-click menu of an app, an app group or a pinned folder edits its name in place (Enter saves, Escape cancels, blank restores the default). An app's name is its label text, also listed under **Names**; a folder's name replaces the directory name on the dock.
@@ -454,6 +455,7 @@ Settings persist in `~/.config/omarchy/omadock.json` and are editable live:
   "iconSize": 0,
   "hoverEffect": "zoom",
   "keepPointer": true,
+  "animations": "full",
   "wheelStepDelay": 150,
   "iconHoverReveal": false,
   "labelMode": "off",
@@ -545,7 +547,7 @@ Settings persist in `~/.config/omarchy/omadock.json` and are editable live:
 | `labelWeight` | `string` | `"medium"` | `"regular"`, `"medium"` or `"bold"` (ignored by the pixel font). |
 | `labelColor` | `string` | `"auto"` | `"auto"` (black or white for what is behind the icons), `"theme"` or `"accent"`. |
 | `labelBackground` | `string` | `"none"` | `"none"`, `"pill"` (behind the name) or `"plate"` (behind icon and name). |
-| `labelShape` | `string` | `"dock"` | Background corners: `"dock"` (the dock's own corner ratio), `"nested"` (square between plates, the panel's radius less the gap on its edges; like `"dock"` for pills and hover labels), `"pill"`, `"rounded"` or `"square"`. |
+| `labelShape` | `string` | `"dock"` | Background corners: `"dock"` (the dock's own corner ratio), `"pill"` (round ends), `"rounded"` or `"square"` (on plates: square between them, the panel's radius less the gap on its edges). A stored `"nested"` reads as `"square"`. |
 | `labelIndicators` | `string` | `"before"` | Window marks on always-on plates: `"before"` the icon, `"after"` the name (an upright column), or `"under"` the icon. |
 | `labelPlateHeight` | `string` | `"icon"` | Always-on plates: `"icon"` (around the icon) or `"dock"` (the dock's full height, one gap from its edges). |
 | `labelReveal` | `string` | `"slide"` | How a name appears: `"slide"`, `"typewriter"` or `"scramble"`. |
@@ -553,6 +555,7 @@ Settings persist in `~/.config/omarchy/omadock.json` and are editable live:
 | `labelMaxWidth` | `int` | `140` | Longest label in px (80–240) before the name is shortened. |
 | `labelNames` | `object` | `{}` | Per-app label text, `{ "appId": "Name" }` (up to 200 entries, 40 characters each). |
 | `keepPointer` | `bool` | `true` | Focusing a window from the dock keeps the pointer where it is instead of warping it to the window centre. |
+| `animations` | `string` | `"full"` | How the dock moves: `"full"` (items, dividers, popups, marks and the badge ease in and out), `"reduced"` (short fades only: no movement, bounces or label typing) or `"off"` (everything changes at once). Settings → Motion & Effects → Animations. |
 | `folderColor` | `string` | `"theme"` | `"theme"`, `"symbolic"`, `"white"`, `"black"`, `"Yaru-blue"`, etc. |
 | `hoverEffect` | `string` | `"zoom"` | Hover mode: magnification `"zoom"` or `"wave"`; effects `"lift"`, `"glow"`, `"glitch"` (shaders); or `"off"`. |
 | `dividerGeometry` | `string` | `"classic"` | Section divider length: `"classic"` keeps the original short lines; `"long"` uses the adjustable `dividerHeight` share. |
@@ -747,6 +750,12 @@ The pixel label font is [Silkscreen](https://fonts.google.com/specimen/Silkscree
 ## 📋 Releases & Changelog
 
 Full release notes, historical changelogs, and upgrade guides across all versions are available on [**GitHub Releases**](https://github.com/thepathless/omadock/releases).
+
+### v4.5.0 — 2026-10-12
+
+- **Eight contributor PRs from [@priard](https://github.com/priard) (#58–#65), all landed as real merges so the contributor commits survive.** **#59** items, popups and marks ease in and out, with an Animations Full / Reduced / Off setting. **#64** the dock always fits its screen: labels shorten and fold, spacing and icons tighten, overflow goes to a `»` tile that shows the hidden items' windows, urgency and badges. **#60** plates fit a pill dock's ends, real pill plates and drive plates. **#63** pinned apps can show their name only while running. **#61** the name shortening defers through a child Timer. **#62** the Both sides gap never shrinks to nothing. **#58** no window captures while the dock's output is gone. **#65** drives take Yaru's device artwork before the icon index. Maintainer fixes on top: pinned web apps no longer match an unrelated app when another app's `Icon=` is an absolute path (issue #66, reported by [@murdialthaf](https://github.com/murdialthaf) — only the icon file name takes part in matching, pinned by a both-row-orders regression test), the group rename field builds only while editing (mirroring v4.4.2), urgent events wait for focus, and window marks re-snap once their cell settles.
+- **The marks-centering live suite measures the card again.** `tests/live/indicators.sh` read its background as the crop's commonest colour, so foot's busy icon art (accent-near salmon, this theme's own accent) elected itself the modal and hid the drawn bar, and the `+N` pill's two glyphs can land a few px apart and count as two marks. The modal is anchored at the flat card colour the suite sets, and a sixth group sharing the pill's band rejoins its twin; verified `INDICATORS PASSED` 3× at 0.0 px on every shape. Line-neutral under the suite's 352-line ratchet.
+- Verified: 239 node + 116 python tests, `node --check` ×8, `qmllint` 0 errors, structure-check PASSED, security-grep 0, `omarchy plugin validate` 0, manifest-check 0, smoke PASSED, all nine live suites green on a live shell (2 jiffies / 6 s idle).
 
 ### v4.4.2 — 2026-10-11
 

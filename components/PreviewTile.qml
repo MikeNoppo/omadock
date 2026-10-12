@@ -1,14 +1,22 @@
 import QtQuick 6.11
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Wayland._Screencopy
 import qs.Commons
 import qs.Ui
+import "../DockOutput.js" as DockOutput
 
 Item {
   id: tile
 
   property var rootRef: null
   readonly property var root: rootRef
+  // Window captures only while the dock's output is there and powered
+  // (DockOutput.js): Hyprland aborts on a capture of a vanished output.
+  // monitorRev re-runs this on Hyprland's monitor events.
+  readonly property bool canCapture: !!tile.root && DockOutput.outputAwake(tile.root.dockScreen ? tile.root.dockScreen.name : "",
+    tile.root.dockScreen ? Hyprland.monitorFor(tile.root.dockScreen) : null, tile.root.monitorRev)
+  readonly property var motion: tile.root ? tile.root.motion : null
   property var dockCard: root ? root.dockCard : null
 
   property var tileData: typeof modelData !== "undefined" ? modelData : null
@@ -56,7 +64,7 @@ Item {
     return (tileArea.containsMouse && !tile.tileMenuOpen) ? root.zoomPeak : 1
   }
   Behavior on magnifyScale {
-    NumberAnimation { duration: 110; easing.type: Easing.OutQuad }
+    NumberAnimation { duration: (tile.motion ? tile.motion.hover : 0); easing.type: Easing.OutQuad }
   }
 
   function doRestore() {
@@ -127,7 +135,7 @@ Item {
       visible: hasContent
       clip: true
       live: false
-      captureSource: tile.win && tile.win.waylandToplevel ? tile.win.waylandToplevel : null
+      captureSource: (tile.canCapture && tile.win && tile.win.waylandToplevel) ? tile.win.waylandToplevel : null
 
       // The capture context negotiates asynchronously over Wayland,
       // so an immediate captureFrame() warns "no recording context".
@@ -221,6 +229,7 @@ Item {
       target: tile
       shown: true
       level: tileTooltipLife.level
+      rises: tileTooltipLife.rises
       body: tileTooltipSurface
 
       BorderSurface {

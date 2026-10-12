@@ -54,6 +54,26 @@ Item {
   readonly property real dynamicSpacing: DockMarkGeometry.rowSpacing(Style.space, marks.dpr, marks.plan.dense)
 
   visible: marks.running
+
+  // A mark that goes stays one exit long (it shrinks and fades), and a new
+  // one grows from nothing (DockMotion).
+  readonly property var motion: marks.root ? marks.root.motion : null
+  property int shownDots: marks.plan.dots
+  Timer {
+    id: dotsLater
+    interval: marks.motion ? marks.motion.base : 0
+    onTriggered: marks.shownDots = marks.plan.dots
+  }
+  // A plan that changes again while a mark is going (a window title, the
+  // focus) does not hold it longer: the exit keeps its own clock.
+  onPlanChanged: {
+    if (marks.plan.dots >= marks.shownDots || !marks.motion || marks.motion.base <= 0) {
+      dotsLater.stop()
+      marks.shownDots = marks.plan.dots
+    } else if (!dotsLater.running) {
+      dotsLater.start()
+    }
+  }
   width: indicatorRow.width
   height: indicatorRow.height
 
@@ -70,14 +90,14 @@ Item {
   Grid {
     id: indicatorRow
     spacing: marks.dynamicSpacing
-    columns: marks.vertical ? 1 : marks.plan.slots
-    rows: marks.vertical ? marks.plan.slots : 1
+    columns: marks.vertical ? 1 : Math.max(marks.plan.slots, marks.shownDots + (marks.plan.overflow ? 1 : 0))
+    rows: marks.vertical ? Math.max(marks.plan.slots, marks.shownDots + (marks.plan.overflow ? 1 : 0)) : 1
     flow: marks.vertical ? Grid.TopToBottom : Grid.LeftToRight
     horizontalItemAlignment: Grid.AlignHCenter
     verticalItemAlignment: Grid.AlignVCenter
 
     Repeater {
-      model: marks.plan.dots
+      model: marks.shownDots
       // Active window: accent bar; open window: dot; minimized: hollow dot.
       delegate: Item {
         id: cell
@@ -86,13 +106,42 @@ Item {
         readonly property bool winMinimized: winObj ? marks.isWinMinimized(winObj) : marks.allMinimized
         readonly property bool winActive: !winMinimized && ((winObj && winObj.address) ? marks.isWinActive(winObj) : (index === 0 && marks.focused))
 
-        width: marks.vertical ? marks.cross : mark.width
-        height: marks.vertical ? mark.height : marks.cross
+        // Along the row the cell grows and shrinks with its mark, so the
+        // others close up as one goes instead of jumping when it is gone.
+        readonly property real along: (marks.motion && marks.motion.layout) ? cell.appear : 1
+        width: marks.vertical ? marks.cross : mark.width * cell.along
+        height: marks.vertical ? mark.height * cell.along : marks.cross
+
+        readonly property bool going: index >= marks.plan.dots
+        property real appear: 0
+        property bool _settled: false
+        // The easing reads the Behavior's target (set before the animation
+        // starts); bound to `going` it could start with the old one.
+        Behavior on appear {
+          id: appearMotion
+          enabled: cell._settled && !!marks.motion && marks.motion.fade
+          NumberAnimation {
+            duration: marks.motion ? marks.motion.base : 0
+            easing.type: appearMotion.targetValue > 0.5 ? Easing.OutCubic : Easing.InCubic
+          }
+        }
+        // Written a turn late: in onCompleted the Behavior would not animate.
+        Component.onCompleted: Qt.callLater(function() { cell._settled = true; cell.appear = cell.going ? 0 : 1 })
+        onGoingChanged: cell.appear = cell.going ? 0 : 1
+        // The mark snaps itself to the pixel grid from its scene position,
+        // which the grow (scale) and the column closing up shift without
+        // moving the mark inside its cell: snapped mid-grow it kept a pixel
+        // off its neighbours. Snap again once the cell has settled or moved.
+        onAppearChanged: if (cell.appear >= 1) Qt.callLater(mark.resnap)
+        onXChanged: Qt.callLater(mark.resnap)
+        onYChanged: Qt.callLater(mark.resnap)
+        opacity: cell.appear
+        scale: (marks.motion && marks.motion.scale) ? 0.4 + 0.6 * cell.appear : 1
 
         DockIndicator {
           id: mark
-          x: marks.vertical ? Math.round((marks.cross - width) * marks.dpr / 2) / marks.dpr : 0
-          y: marks.vertical ? 0 : Math.round((marks.cross - height) * marks.dpr / 2) / marks.dpr
+          x: Math.round(((marks.vertical ? marks.cross : cell.width) - width) * marks.dpr / 2) / marks.dpr
+          y: Math.round(((marks.vertical ? cell.height : marks.cross) - height) * marks.dpr / 2) / marks.dpr
           rootRef: marks.rootRef
           vertical: marks.vertical
           inkOverride: marks.markInk

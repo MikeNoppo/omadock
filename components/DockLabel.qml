@@ -16,6 +16,7 @@ Item {
 
   property var rootRef: null
   readonly property var root: rootRef
+  readonly property var motion: label.root ? label.root.motion : null
   property string kind: "app"
   property string appId: ""
   property string name: ""
@@ -30,6 +31,15 @@ Item {
   // window" mark.
   property var marksFrom: null
   property bool backgroundMarks: false
+  // Any always-on name can fold (foldable): "Pinned apps: When running"
+  // (labelPinned) folds a sleeping pinned app's, the dock's fit (DockFit.js)
+  // folds names when the row runs out of room. The tile says when (folded).
+  // A folded name keeps its plate around the icon, and opening widens it.
+  readonly property bool foldable: !!label.style && !label.style.hover
+  property bool folded: false
+  // Folded because the app sleeps or is still starting ("When running"):
+  // its window marks wait for the name. A name folded for room keeps them.
+  property bool marksHeld: false
 
   readonly property var style: root ? root.labelStyle(label.kind) : null
   readonly property string fullText: root ? root.labelName(label.appId, label.name) : label.name
@@ -52,8 +62,11 @@ Item {
   // The column's room opens only while there is something to show, and
   // eases in and out as an app starts or stops.
   readonly property bool hasMarks: !!(label.marksFrom && label.marksFrom.running) || label.backgroundMarks
-  property real marksLevel: label.sideMarks && label.hasMarks ? 1 : 0
-  Behavior on marksLevel { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+  // A name held folded (marksHeld) keeps a column only for the faint
+  // "playing without a window" mark; its window marks wait for the name to
+  // open. A name folded for room keeps all of them.
+  property real marksLevel: label.sideMarks && ((label.folded && label.marksHeld) ? label.backgroundMarks : label.hasMarks) ? 1 : 0
+  Behavior on marksLevel { NumberAnimation { duration: (label.motion ? label.motion.base : 0); easing.type: Easing.OutCubic } }
   // The column keeps the plate's own padding to the plate's edge (the room a
   // name has at the far end), the marks' own width and a gap to the art or the
   // name: the sizes are the ones the row draws with, from DockMarkGeometry.js,
@@ -66,8 +79,24 @@ Item {
   readonly property real markSpan: label.markEdge + label.markWidth + label.markGap
   // Before the icon, the room sits ahead of the art (less the margin the
   // plate already has there): the tile shifts its icon by this much.
-  readonly property real lead: (label.sideMarks && !label.marksAfter)
-    ? Math.round(label.progress * label.marksLevel * Math.max(0, label.markSpan - label.artMargin)) : 0
+  // A pill plate's round end keeps clear of the art: the room its curve
+  // takes at the art's top and bottom (DockLabels.pillRoom), past the margin
+  // the slot already has, and the same for the name at the far end.
+  readonly property bool pillPlate: label.plate && !!label.style && label.style.shape === "pill"
+  readonly property real pillLead: label.pillPlate
+    ? Math.max(0, Math.ceil(DockLabels.pillRoom(plateRect.height / 2, (label.root ? label.root.baseIconArt : 0) / 2)) + Style.space(1) - label.artMargin) : 0
+  readonly property real pillTrail: label.pillPlate ? Math.ceil(DockLabels.pillRoom(plateRect.height / 2, textItem.implicitHeight / 2)) : 0
+  // The column's room past the slot's own margin. A foldable name keeps it
+  // while folded (the plate is there), so it is not scaled by progress.
+  // The pill curve keeps its own clearance, scaled by progress like a name.
+  readonly property real columnRoom: label.marksLevel * Math.max(0, label.markSpan - label.artMargin)
+  readonly property real lead: Math.round(Math.max(
+    (label.sideMarks && !label.marksAfter) ? (label.foldable ? 1 : label.progress) * label.columnRoom : 0,
+    label.progress * label.pillLead))
+  // Folded with the column after the icon: its room behind the art, handed
+  // over to the name's trail as the name opens.
+  readonly property real foldTail: (label.sideMarks && label.marksAfter && label.foldable)
+    ? Math.round((1 - label.progress) * label.columnRoom) : 0
   // Empty room between the icon slot's edge and the drawn art.
   readonly property real artMargin: label.root ? (label.root.iconSlot - label.root.baseIconArt) / 2 : Style.space(7)
   // The name is placed from the art's edge, not the slot's: a pill sits
@@ -78,7 +107,7 @@ Item {
   // inside its art; the name ends with about the same room, so a label
   // keeps the spacing an icon would before the next item, a divider or the
   // dock's edge. A plate is its own frame and needs only a little.
-  readonly property real trail: label.plate ? Style.space(1) + (label.marksAfter ? label.marksLevel * (label.markSpan - label.pad) : 0) : label.artMargin + Style.space(3)
+  readonly property real trail: label.plate ? Style.space(1) + Math.max(label.marksAfter ? label.marksLevel * (label.markSpan - label.pad) : 0, label.pillTrail) : label.artMargin + Style.space(3)
   readonly property real naturalWidth: label.shown && label.shortText !== ""
     ? Math.ceil(textWidth.advanceWidth) + label.pad * 2 + label.gap + label.trail : 0
 
@@ -105,15 +134,22 @@ Item {
     label.shortText = r.text
     label.shortened = r.shortened
   }
-  onFullTextChanged: Qt.callLater(label.reshorten)
-  onStyleChanged: Qt.callLater(label.reshorten)
+  // Deferred through a child Timer, not Qt.callLater: a queued callLater
+  // still runs after the label is torn down, and when the dock's whole
+  // instance goes (a plugin reload, a shell restart) its context is already
+  // invalid there - the DockLabels import reads as null and the call throws
+  // the same fault at the shortenName line, past the guard above. The Timer
+  // dies with the label, so nothing is left queued.
+  Timer { id: reshortenLater; interval: 0; onTriggered: label.reshorten() }
+  onFullTextChanged: reshortenLater.restart()
+  onStyleChanged: reshortenLater.restart()
 
   // ---- open state. Hover mode opens after a short dwell so a sweep across
   // the dock does not ripple; with another label still open or closing it
   // switches at once. Never during a drag.
   property bool dwelled: false
   readonly property bool dragFree: label.root ? !label.root.dockDragActive : true
-  readonly property bool wantOpen: label.shown
+  readonly property bool wantOpen: label.shown && !label.folded
     && (!label.style.hover || (label.hovered && label.dwelled && label.dragFree))
   Timer {
     id: dwell
@@ -130,11 +166,17 @@ Item {
     label.counted = label.counts
   }
   property real progress: label.wantOpen ? 1 : 0
-  Behavior on progress { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+  // A foldable name widens its tile only where layout eases (Full); at
+  // Reduced the width snaps and the name fades (nameFade).
+  Behavior on progress { NumberAnimation { duration: (label.motion && (label.motion.layout || !label.foldable) ? label.motion.base : 0); easing.type: Easing.OutCubic } }
+  property real nameFade: label.wantOpen ? 1 : 0
+  Behavior on nameFade { NumberAnimation { duration: (label.motion ? label.motion.fast : 0); easing.type: Easing.OutCubic } }
+  // The plate stays put while the name folds into it.
+  readonly property bool restingPlate: label.plate && label.shown && label.foldable
   // Hover labels slide out over the neighbours instead of widening the
   // tile, so the dock never moves under the pointer.
   readonly property bool overlay: !!label.style && label.style.hover
-  readonly property real rawExtra: label.overlay ? 0 : Math.round(label.progress * label.naturalWidth) + label.lead
+  readonly property real rawExtra: label.overlay ? 0 : Math.round(label.progress * label.naturalWidth) + label.lead + label.foldTail
   // In a plate row the tile's width lands on the device-pixel grid.
   readonly property real extra: (label.rawExtra > 0 && label.root && label.root.labelPlates)
     ? DockLabels.gridCeil(label.root.iconSlot + label.rawExtra, label.root.outputScale) - label.root.iconSlot
@@ -151,12 +193,35 @@ Item {
     if (label.slot >= 0) label.root.setLabelExtra(label.slot, label.owner, label.extra, label.mirror ? label.extra - label.lead : label.lead)
   }
   onExtraChanged: label.syncExtra()
-  onSlotChanged: label.syncExtra()
-  Component.onCompleted: { label.reshorten(); label.syncExtra() }
+  onSlotChanged: { label.syncExtra(); label.syncNatural() }
+  Component.onCompleted: { label.reshorten(); label.syncExtra(); label.syncNatural() }
   Component.onDestruction: {
     if (label.root && label._slot >= 0) label.root.setLabelExtra(label._slot, label.owner, 0)
+    if (label.fitHost && label._nslot >= 0) label.fitHost.setNatural(label._nslot, label.owner, null)
     if (label.root && label.counted) label.root.labelsOpen -= 1
   }
+
+  // The full width for the fit planner (DockFit.js, DockFitHost): from the
+  // full name and the targets (never the animated progress or marks level),
+  // so it does not depend on the plan it feeds.
+  readonly property var fitHost: label.root ? label.root.fitHostRef : null
+  TextMetrics { id: fullWidth; font: textItem.font; text: label.fullText }
+  readonly property real trailTarget: label.plate ? Style.space(1) + ((label.marksAfter && label.hasMarks) ? label.markSpan - label.pad : 0) : label.artMargin + Style.space(3)
+  readonly property var natural: (label.shown && !label.overlay) ? {
+    text: fullWidth.advanceWidth,
+    inner: label.pad * 2 + label.gap + (label.plate ? Style.space(1) : label.trailTarget),
+    outer: label.pad * 2 + label.gap + label.trailTarget
+      + ((label.sideMarks && !label.marksAfter && label.hasMarks) ? Math.max(0, label.markSpan - label.artMargin) : 0),
+    folded: (label.sideMarks && (label.backgroundMarks || label.hasMarks)) ? Math.max(0, label.markSpan - label.artMargin) : 0
+  } : null
+  property int _nslot: -1
+  function syncNatural() {
+    if (!label.fitHost) return
+    if (label._nslot >= 0 && label._nslot !== label.slot) label.fitHost.setNatural(label._nslot, label.owner, null)
+    label._nslot = label.slot
+    if (label.slot >= 0) label.fitHost.setNatural(label.slot, label.owner, label.natural)
+  }
+  onNaturalChanged: label.syncNatural()
 
   // ---- reveal (typewriter / scramble swap the text; slide just grows)
   property real revealT: 1
@@ -173,6 +238,8 @@ Item {
     duration: Math.min(300, 25 * Math.max(1, label.shortText.length))
   }
   function reveal(styleName) {
+    // Typing and scrambling are one-shot motion (DockMotion reveal).
+    if (!label.motion || !label.motion.reveal) { label.revealT = 1; return }
     label.revealStyle = styleName
     label.seed = Math.random() * 100
     eraseAnim.stop()
@@ -184,6 +251,8 @@ Item {
     if (!label.style) return
     // Reveals belong to hover labels; always-on labels just stand there.
     if (!label.style.hover) return
+    // Without reveal motion the name stands there whole.
+    if (!label.motion || !label.motion.reveal) { revealAnim.stop(); eraseAnim.stop(); label.revealT = 1; return }
     if (label.wantOpen) label.reveal(label.style.reveal)
     else if (label.style.reveal === "typewriter") { revealAnim.stop(); label.revealStyle = "typewriter"; eraseAnim.restart() }
   }
@@ -191,7 +260,7 @@ Item {
 
   // ---- hover sync with the icon's HoverFx
   property real hoverLevel: label.hovered ? 1 : 0
-  Behavior on hoverLevel { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+  Behavior on hoverLevel { NumberAnimation { duration: (label.motion ? label.motion.base : 0); easing.type: Easing.OutCubic } }
   readonly property string hoverEffect: label.root ? label.root.hoverEffect : ""
   readonly property real liftY: label.hoverEffect === "lift" && label.root ? -label.root.baseIconArt * 0.16 * label.hoverLevel : 0
   // The tile's launch / urgent bounce: a label (and its plate and marks)
@@ -211,7 +280,7 @@ Item {
   x: label.mirror ? label.tileLead : (label.iconBox ? label.iconBox.x + label.iconBox.width : 0)
   width: label.overlay ? Math.round(label.progress * label.naturalWidth) : label.extra - label.lead
   height: parent ? parent.height : 0
-  visible: label.width > 0
+  visible: label.width > 0 || label.restingPlate
 
   // Plate: one surface behind icon and name. The art gets the same margin
   // on its leading side as the name on the trailing one, and the window
@@ -248,18 +317,21 @@ Item {
       : label.mirror
       ? label.width + label.artMargin + artSize + hMargin + label.lead - edge
       : label.width - edge - x
-    readonly property real baseRadius: label.style ? Math.min(height * 0.32, DockLabels.labelRadius(label.style.shape, height, label.style.dockRatio)) : 0
-    // Nested corners know the plate's place in its panel only in a plate row.
+    // Capped so the curve keeps off the icon; a pill makes room instead (pillLead).
+    readonly property real baseRadius: label.style ? Math.min(height * (label.pillPlate ? 0.5 : 0.32), DockLabels.labelRadius(label.style.shape, height, label.style.dockRatio)) : 0
+    // Nested corners (and an edge corner that would poke out of the panel's
+    // curve) know the plate's place in its panel only in a plate row.
     readonly property var corners: DockLabels.plateCorners(label.style ? label.style.shape : "dock", height, baseRadius,
       label.style ? label.style.nestedRadius : 0,
-      (spacing && label.root.dockCardComp) ? label.root.dockCardComp.plateEdges[label.slot] : null)
+      (spacing && label.root.dockCardComp) ? label.root.dockCardComp.plateEdges[label.slot] : null,
+      label.style ? label.style.plateFit : 0)
     radius: baseRadius
     topLeftRadius: corners.tl
     topRightRadius: corners.tr
     bottomLeftRadius: corners.bl
     bottomRightRadius: corners.br
     color: label.style ? Util.alpha(label.fill, label.overlay ? 1 : 0.55 + 0.25 * label.hoverLevel) : "transparent"
-    opacity: label.progress
+    opacity: label.restingPlate ? 1 : label.progress
     // Lifts with the icon and the name, like one button.
     transform: Translate { y: label.rise }
     // Lifted off the icons it covers.
@@ -280,7 +352,7 @@ Item {
     id: markColumn
     visible: label.sideMarks
     transform: Translate { y: label.rise }
-    opacity: label.progress * label.marksLevel
+    opacity: (label.foldable ? 1 : label.progress) * label.marksLevel
     readonly property real artSize: label.root ? label.root.baseIconArt : 0
     readonly property real iconW: label.iconBox ? label.iconBox.width : 0
     // At the plate's leading edge for "before", its trailing edge for
@@ -334,7 +406,7 @@ Item {
       height: textItem.implicitHeight + Style.space(2)
       // Centred on the icon art, which sits on the dock floor.
       y: label.root ? Math.round(label.height - label.root.iconArtBottom - label.root.baseIconArt / 2 - height / 2) : 0
-      opacity: label.progress
+      opacity: label.foldable ? Math.min(label.progress, label.nameFade) : label.progress
       transform: Translate { y: label.rise }
 
       Rectangle {
