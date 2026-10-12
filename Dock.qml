@@ -200,6 +200,8 @@ Item {
   DockPersistLogic { id: persistLogic }
   DockGroupCycleLogic { id: groupCycleLogic }
   DockLabelLogic { id: labelLogic }
+  DockFitHost { id: fitHost; dockRoot: root; rivals: [stackLife, groupLife, contextLife] }
+  readonly property var fitHostRef: fitHost
 
   // Fallback standalone application library for host capability gates (e.g. Omarchy 4.x scoped plugins)
 
@@ -305,11 +307,11 @@ Item {
   // Pinned-group | running divider. Sits after the tile section when tiles
   // exist, so it doubles as the right tile divider.
   readonly property bool hasSeparator: (root.pinnedSection.length > 0 || root.hasTiles) && root.visibleRunningCount > 0
-  readonly property real gapWidth: root.labelPlates ? root.plateSpacing.gap : Style.space(root.itemSpacing)
+  readonly property real gapWidth: fitHost.plan.t < 1 ? fitHost.plan.gap : (root.labelPlates ? root.plateSpacing.gap : Style.space(root.itemSpacing))
   // Split sections turn each separator into the gap between two panels. Each
   // panel reaches the card padding past its outer icons, so the separator
   // slot is sized to leave the chosen visible gap between the panels.
-  readonly property real sectionGap: Style.space(root.sectionSpacing)
+  readonly property real sectionGap: Style.space(root.sectionSpacing) * Math.min(1, fitHost.plan.t)
   // Without the split, a divider's slot gets half the margin an icon has
   // inside its own slot on each side. Squeezed against its neighbours, the
   // line made every difference in icon width show; with the full margin it
@@ -420,9 +422,8 @@ Item {
   // ------------------------------------------------- sizing
 
   property int configuredIconSize: 0
-  readonly property int iconSize: root.configuredIconSize > 0
-    ? root.configuredIconSize
-    : Math.max(28, Math.round(Style.bar.sizeHorizontal * 0.9))
+  readonly property int baseIconSize: root.configuredIconSize > 0 ? root.configuredIconSize : Math.max(28, Math.round(Style.bar.sizeHorizontal * 0.9))
+  readonly property int iconSize: fitHost.plan.iconSize > 0 ? Math.min(root.baseIconSize, fitHost.plan.iconSize) : root.baseIconSize
   readonly property int iconSlot: root.labelPlates ? DockLabels.gridInt(root.iconSize + Style.space(10), root.outputScale) : root.iconSize + Style.space(10)
 
   // ------------------------------------------------- model
@@ -706,37 +707,7 @@ Item {
   // palette colours (colors.toml) that sit furthest enough in hue from the
   // accent and from each other, so the gradient never collapses into one
   // hue. Falls back to the accent alone when the theme names no colours.
-  readonly property var themeGradientColors: {
-    var _tv = root.themeVersion
-    var text = ""
-    try {
-      text = DockModel.readCapped(themeColorsFile.text, DockModel.MAX_COLORS_TOML_BYTES)
-    } catch (e) {
-      console.warn("[omadock] Failed reading theme colors:", e)
-    }
-    var named = {}
-    var re = /^\s*([a-z_]+)\s*=\s*"(#[0-9a-fA-F]{6})"/gm
-    var m
-    while ((m = re.exec(text)) !== null) named[m[1]] = m[2]
-    var accent = named.accent || String(Color.accent)
-    var picked = [accent]
-    var order = ["magenta", "blue", "cyan", "red", "green", "orange", "yellow"]
-    function hueGap(a, b) {
-      var ha = Qt.color(a).hslHue, hb = Qt.color(b).hslHue
-      if (ha < 0 || hb < 0) return 1
-      var d = Math.abs(ha - hb)
-      return Math.min(d, 1 - d)
-    }
-    for (var i = 0; i < order.length && picked.length < 3; i++) {
-      var c = named[order[i]]
-      if (!c) continue
-      var ok = true
-      for (var j = 0; j < picked.length; j++) if (hueGap(c, picked[j]) < 0.07) ok = false
-      if (ok) picked.push(c)
-    }
-    while (picked.length < 3) picked.push(accent)
-    return picked
-  }
+  readonly property var themeGradientColors: styleLogic.themeGradientColors(root, themeColorsFile.text)
 
   readonly property var gradientColors: {
     if (root.gradientPreset !== "theme") {
@@ -913,6 +884,7 @@ Item {
   property string labelShape: "dock"      // dock | pill | rounded | square
   property string labelIndicators: "before" // before | after | under (always-on plates)
   property string labelPlateHeight: "icon"  // icon | dock (always-on plates)
+  property string labelPinned: "always"     // always | running (always-on names of pinned apps)
   readonly property bool labelPlates: root.labelMode === "always" && root.labelBackground === "plate"
   readonly property var plateSpacing: labelLogic.plateSpacing(root)
   readonly property bool labelSideMarks: DockLabels.sideMarks(root.labelMode, root.labelBackground, root.labelIndicators)
@@ -2319,7 +2291,7 @@ Item {
     // ------------------------------------------------------------ Folder Stack Popover
     // Created only while open: idle popup windows cost a QQuickWindow each,
     // and several hidden ones next to the dock broke its hover handling.
-    PopupLife { id: stackLife; dockRoot: root; rivals: [groupLife, contextLife]; want: root.activeStackFolder !== "" && root.dockVisible }
+    PopupLife { id: stackLife; dockRoot: root; rivals: [groupLife, contextLife, fitHost.overflowLife]; want: root.activeStackFolder !== "" && root.dockVisible }
     LazyLoader {
       id: folderStackLoader
       active: stackLife.alive
@@ -2343,7 +2315,7 @@ Item {
     // ------------------------------------------------------------ App Group Popover
     // Created only while open: idle popup windows cost a QQuickWindow each,
     // and several hidden ones next to the dock broke its hover handling.
-    PopupLife { id: groupLife; dockRoot: root; rivals: [stackLife, contextLife]; want: root.activeAppGroupId !== "" && root.dockVisible }
+    PopupLife { id: groupLife; dockRoot: root; rivals: [stackLife, contextLife, fitHost.overflowLife]; want: root.activeAppGroupId !== "" && root.dockVisible }
     LazyLoader {
       id: appGroupLoader
       active: groupLife.alive
@@ -2372,7 +2344,7 @@ Item {
     // ------------------------------------------------------------ context menu
     // Created only while open: idle popup windows cost a QQuickWindow each,
     // and several hidden ones next to the dock broke its hover handling.
-    PopupLife { id: contextLife; dockRoot: root; rivals: [stackLife, groupLife]; want: root.contextAppId !== "" }
+    PopupLife { id: contextLife; dockRoot: root; rivals: [stackLife, groupLife, fitHost.overflowLife]; want: root.contextAppId !== "" }
     LazyLoader {
       id: contextMenuLoader
       active: contextLife.alive
