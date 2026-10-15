@@ -61,8 +61,7 @@ function normalizeTaskStatus(appId, status, exitCode, title, duration) {
     status: resolved,
     exitCode: code,
     title: ttl,
-    duration: dur,
-    timestamp: Date.now()
+    duration: dur
   }
 }
 
@@ -147,63 +146,45 @@ function taskStatusFor(map, appId, dockModel) {
   return null
 }
 
+// The one owner of a task's look: the badge on the tile (resolveBadgeView) and
+// the hover chip's dot (DockItem.qml) both read these, so the two surfaces
+// cannot disagree about what a status looks like.
+var TASK_GLYPH = { running: "●", success: "✓", error: "!" }
+var TASK_COLOR = { running: "#89b4fa", success: "#a6e3a1", error: "#f38ba8" }
+
+function statusGlyph(status) { return TASK_GLYPH[status] || "" }
+
+// An unknown status has no colour of its own: "transparent" is what the badge
+// already treats as "nothing to draw", so the chip's dot and the badge's fill
+// agree even on a status neither of them knows.
+function statusColor(status) { return TASK_COLOR[status] || "transparent" }
+
+// What the hover chip says: what ran, how long it took, and why it failed.
+function chipLabel(taskInfo) {
+  if (!taskInfo) return ""
+  var title = taskInfo.title ? taskInfo.title : (taskInfo.status === "error" ? "Task failed" : "Task completed")
+  var dur = taskInfo.duration > 0 ? " (" + taskInfo.duration + "s)" : ""
+  var code = (taskInfo.status === "error" && taskInfo.exitCode !== 0) ? " [Exit " + taskInfo.exitCode + "]" : ""
+  return title + dur + code
+}
+
 function resolveBadgeView(notificationCount, taskInfo, activeMatch) {
   var notif = Math.max(0, Math.round(Number(notificationCount) || 0))
 
   if (taskInfo) {
-    if (taskInfo.status === "error") {
-      return {
-        glyph: "!",
-        color: "#f38ba8",
-        count: 0,
-        mode: "status",
-        status: "error"
-      }
-    }
-    if (notif > 0) {
-      return {
-        glyph: "",
-        color: "transparent",
-        count: notif,
-        mode: "count",
-        status: ""
-      }
-    }
-    if (taskInfo.status === "running") {
-      return {
-        glyph: "●",
-        color: "#89b4fa",
-        count: 0,
-        mode: "status",
-        status: "running"
-      }
-    }
-    if (taskInfo.status === "success") {
-      return {
-        glyph: "✓",
-        color: "#a6e3a1",
-        count: 0,
-        mode: "status",
-        status: "success"
-      }
-    }
+    var status = taskInfo.status
+    // An error outranks a notification count; a count outranks a task that is
+    // merely running or done.
+    if (status === "error")
+      return { glyph: statusGlyph(status), color: statusColor(status), count: 0, mode: "status", status: status }
+    if (notif > 0)
+      return { glyph: "", color: "transparent", count: notif, mode: "count", status: "" }
+    if (status === "running" || status === "success")
+      return { glyph: statusGlyph(status), color: statusColor(status), count: 0, mode: "status", status: status }
   }
 
-  if (notif > 0) {
-    return {
-      glyph: "",
-      color: "transparent",
-      count: notif,
-      mode: "count",
-      status: ""
-    }
-  }
+  if (notif > 0)
+    return { glyph: "", color: "transparent", count: notif, mode: "count", status: "" }
 
-  return {
-    glyph: "",
-    color: "transparent",
-    count: 0,
-    mode: "none",
-    status: ""
-  }
+  return { glyph: "", color: "transparent", count: 0, mode: "none", status: "" }
 }

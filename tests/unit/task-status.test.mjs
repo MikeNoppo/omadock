@@ -1,6 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
+import { join } from "node:path"
 import vm from "node:vm"
 
 const file = process.env.DOCKTASKS || new URL("../../DockTasks.js", import.meta.url)
@@ -115,6 +116,56 @@ test("a task never bleeds onto an app whose id merely contains its own", () => {
   assert.ok(M.taskStatusFor(bare, "com.mitchellh.ghostty"))
   // ...and a separate id that only shares a prefix stays untouched.
   assert.equal(M.taskStatusFor(bare, "ghostty-gui"), null)
+})
+
+test("the status look has one owner, and the hover chip reads it", () => {
+  // The tile's badge (resolveBadgeView) and the hover chip (components/
+  // DockItem.qml) are two surfaces describing one task. Before this rule each
+  // carried its own copy of the status palette and its own copy of the chip's
+  // label, so the badge and the chip could disagree about what a status looks
+  // like. DockTasks.js is now the only file that spells a status colour.
+  const root = new URL("../../", import.meta.url).pathname
+  const palette = ["#f38ba8", "#89b4fa", "#a6e3a1"]
+  const offenders = []
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) {
+        // tests/ holds this assertion; experiment/ is the sibling worktree, a
+        // second checkout of the same files.
+        if (["tests", "node_modules", ".git", "experiment", "__pycache__"].includes(e.name)) continue
+        walk(p)
+        continue
+      }
+      if (!/\.(qml|js|mjs)$/.test(e.name) || e.name === "DockTasks.js") continue
+      const text = readFileSync(p, "utf8")
+      for (const hex of palette)
+        if (text.includes(hex)) offenders.push(p.slice(root.length) + " spells " + hex)
+    }
+  }
+  walk(root)
+  assert.deepEqual(offenders, [], "a status colour is spelled outside DockTasks.js: " + offenders.join(", "))
+
+  // The chip's two bindings go through the same owner the badge does.
+  const item = readFileSync(new URL("../../components/DockItem.qml", import.meta.url), "utf8")
+  assert.match(item, /DockTasks\.statusColor\(/, "the chip's dot must read DockTasks.statusColor")
+  assert.match(item, /DockTasks\.chipLabel\(/, "the chip's text must read DockTasks.chipLabel")
+
+  // An unknown status has no colour of its own: it must not borrow one, or the
+  // chip could draw a healthy green dot for a status neither surface knows.
+  assert.equal(M.statusColor(""), "transparent")
+  assert.equal(M.statusGlyph(""), "")
+  assert.equal(M.statusColor("running"), M.resolveBadgeView(0, { status: "running" }, false).color)
+  assert.equal(M.statusColor("success"), M.resolveBadgeView(0, { status: "success" }, false).color)
+  assert.equal(M.statusColor("error"), M.resolveBadgeView(0, { status: "error" }, false).color)
+
+  // The chip's text is built by the same module, including its fallbacks.
+  assert.equal(M.chipLabel({ status: "success", exitCode: 0, title: "cargo build", duration: 14 }),
+    "cargo build (14s)")
+  assert.equal(M.chipLabel({ status: "error", exitCode: 3, title: "cargo test", duration: 7 }),
+    "cargo test (7s) [Exit 3]")
+  assert.equal(M.chipLabel({ status: "running", exitCode: 0, title: "", duration: 0 }), "Task completed")
+  assert.equal(M.chipLabel(null), "")
 })
 
 test("resolveBadgeView: priorities and states", () => {
