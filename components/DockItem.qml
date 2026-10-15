@@ -33,12 +33,9 @@ Item {
     return DockModel.groupBadgeTotal([item.appId], root.notificationBadges)
   }
 
-  readonly property var taskInfo: {
-    if (!root) return null
-    var ts = root.taskStatus ? root.taskStatus : (root.sharedState ? root.sharedState.taskStatus : null)
-    if (!ts) return null
-    return DockTasks.taskStatusFor(ts, item.appId, root.dockModel)
-  }
+  readonly property var taskInfo: root
+    ? DockTasks.taskStatusFor(DockModel, root.taskMap, item.appId, root.dockModel)
+    : null
 
   readonly property var badgeView: {
     return DockTasks.resolveBadgeView(item.notificationCount, item.taskInfo, item.isFocused)

@@ -2,37 +2,33 @@
 //
 // Plain JS with no Qt globals, so unit tests run it in the same vm context as
 // DockModel.js, Plan.js, Buttons.js and SettingsSearch.js.
+//
+// Every id SPELLING is owned by DockModel (`stripDesktop` and `cliAppId`'s one
+// table), passed in as `ids` because a root JS module imports nothing: there is
+// no second alias table and no second `.desktop` strip in this file.
+//
+// The one rule that stays here is isSameApp, and it is narrower than the
+// model's matcher on purpose. A task must attach to exactly ONE tile, so a task
+// filed for `ghostty` may not badge `ghostty-gui`; DockModel.isAppMatch widens
+// the comparison with candidate tokens (`ghostty-gui` -> `ghostty`) because a
+// notification arrives under partial ids, and measured against the task path
+// that widening re-introduced the `foot`/`footclient` class of bleed. Both
+// rules agree on every reverse-DNS pair, which is where the two paths meet.
 
 var MAX_TASK_TITLE = 120
 var MAX_TASK_STATUS_ENTRIES = 64
 
-function stripDesktopId(id) {
-  if (typeof id === "object" && id !== null && id.appId) id = id.appId
-  var value = String(id == null ? "" : id).trim()
-  var raw = value.replace(/\.desktop$/i, "")
-  if (/^(?:org\.omarchy\.)?agy$/i.test(raw)) return "antigravity"
-  if (/^org\.omarchy\.btop(?:-.*)?$/i.test(raw)) return "btop"
-  if (/^(?:com\.anthropic\.)?claude(?:-code)?$/i.test(raw)) return "claude"
-  if (/^aider(?:-chat)?$/i.test(raw)) return "aider"
-  if (/^(?:com\.cursor\.)?cursor(?:-bin)?$/i.test(raw)) return "cursor"
-  if (/^(?:com\.codeium\.)?windsurf$/i.test(raw)) return "windsurf"
-  if (/^ollama(?:-app)?$/i.test(raw)) return "ollama"
-  if (/^(?:github-)?copilot(?:-cli)?$/i.test(raw)) return "copilot"
-  if (/^open-?interpreter$/i.test(raw)) return "interpreter"
-  return raw
-}
-
-function normalizeTaskStatus(appId, status, exitCode, title, duration) {
+function normalizeTaskStatus(ids, appId, status, exitCode, title, duration) {
   var rawId = String(appId || "").trim()
   if (!rawId) return null
   var primary = rawId
   var fallback = ""
   if (rawId.indexOf("|") >= 0) {
     var parts = rawId.split("|")
-    primary = stripDesktopId(parts[0])
-    fallback = stripDesktopId(parts[1])
+    primary = ids.cliAppId(parts[0])
+    fallback = ids.cliAppId(parts[1])
   } else {
-    primary = stripDesktopId(rawId)
+    primary = ids.cliAppId(rawId)
   }
   if (!primary && !fallback) return null
   var id = primary || fallback
@@ -65,10 +61,10 @@ function normalizeTaskStatus(appId, status, exitCode, title, duration) {
   }
 }
 
-function withTaskStatus(map, appId, taskObj) {
+function withTaskStatus(ids, map, appId, taskObj) {
   var out = {}
   for (var k in (map || {})) out[k] = map[k]
-  var id = stripDesktopId(appId)
+  var id = ids.cliAppId(appId)
   if (!id && taskObj) id = taskObj.appId
   if (!id) return out
   if (!taskObj) {
@@ -83,61 +79,60 @@ function withTaskStatus(map, appId, taskObj) {
   return out
 }
 
-function isAppMatchSimple(idA, idB) {
+// The same id, or a reverse-DNS id and its bare name - and nothing else. See
+// the header for why this is not DockModel.isAppMatch.
+function isSameApp(ids, idA, idB) {
   if (!idA || !idB) return false
-  var a = stripDesktopId(idA).toLowerCase()
-  var b = stripDesktopId(idB).toLowerCase()
+  var a = ids.cliAppId(idA).toLowerCase()
+  var b = ids.cliAppId(idB).toLowerCase()
   if (a === b) return true
-  // A reverse-DNS desktop id (com.mitchellh.ghostty) matches its bare name
-  // (ghostty) only across a dot boundary: no substring aliasing, so a task
-  // filed under foot never badges the separate footclient app.
   return a.length > b.length ? a.endsWith("." + b) : b.endsWith("." + a)
 }
 
-function hasDockApp(dockModel, targetId) {
+function hasDockApp(ids, dockModel, targetId) {
   if (!dockModel || !targetId) return false
   var list = (dockModel.pinned || []).concat(dockModel.running || [])
   for (var i = 0; i < list.length; i++) {
     var entry = list[i]
-    if (entry && (entry.appId === targetId || entry.id === targetId || isAppMatchSimple(entry.appId || entry.id, targetId))) {
+    if (entry && (entry.appId === targetId || entry.id === targetId || isSameApp(ids, entry.appId || entry.id, targetId))) {
       return true
     }
   }
   return false
 }
 
-function clearTaskStatusFor(map, appId) {
+function clearTaskStatusFor(ids, map, appId) {
   var out = {}
   for (var k in (map || {})) out[k] = map[k]
-  var id = stripDesktopId(appId)
+  var id = ids.cliAppId(appId)
   if (!id) return out
   delete out[id]
   for (var key in out) {
     var entry = out[key]
-    if (key === id || isAppMatchSimple(key, id) || (entry && (isAppMatchSimple(entry.appId, id) || isAppMatchSimple(entry.fallbackId, id)))) {
+    if (key === id || isSameApp(ids, key, id) || (entry && (isSameApp(ids, entry.appId, id) || isSameApp(ids, entry.fallbackId, id)))) {
       delete out[key]
     }
   }
   return out
 }
 
-function taskStatusFor(map, appId, dockModel) {
+function taskStatusFor(ids, map, appId, dockModel) {
   if (!map || typeof map !== "object") return null
-  var id = stripDesktopId(appId)
+  var id = ids.cliAppId(appId)
   if (!id) return null
 
   // Pass 1: exact or alias match on primary appId
   if (map[id]) return map[id]
   for (var key in map) {
     var entry = map[key]
-    if (entry && isAppMatchSimple(entry.appId || key, id)) return entry
+    if (entry && isSameApp(ids, entry.appId || key, id)) return entry
   }
 
   // Pass 2: match on fallbackId if primary is not present on the dock
   for (var key2 in map) {
     var entry2 = map[key2]
-    if (entry2 && entry2.fallbackId && isAppMatchSimple(entry2.fallbackId, id)) {
-      if (!dockModel || !hasDockApp(dockModel, entry2.appId)) {
+    if (entry2 && entry2.fallbackId && isSameApp(ids, entry2.fallbackId, id)) {
+      if (!dockModel || !hasDockApp(ids, dockModel, entry2.appId)) {
         return entry2
       }
     }

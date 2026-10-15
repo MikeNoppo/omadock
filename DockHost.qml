@@ -270,14 +270,14 @@ Item {
 
     // Developer task HUD and command completion status
     function reportTask(appId: string, status: string, exitCode: int, title: string, duration: int): string {
-      var task = DockTasks.normalizeTaskStatus(appId, status, exitCode, title, duration)
+      var task = DockTasks.normalizeTaskStatus(DockModel, appId, status, exitCode, title, duration)
       if (!task) return "invalid"
-      sharedStore.taskStatus = DockTasks.withTaskStatus(sharedStore.taskStatus, task.appId, task)
+      sharedStore.taskStatus = DockTasks.withTaskStatus(DockModel, sharedStore.taskStatus, task.appId, task)
       return "ok"
     }
 
     function clearTask(appId: string): void {
-      sharedStore.taskStatus = DockTasks.clearTaskStatusFor(sharedStore.taskStatus, appId)
+      sharedStore.taskStatus = DockTasks.clearTaskStatusFor(DockModel, sharedStore.taskStatus, appId)
     }
 
     function taskStatus(): string {
