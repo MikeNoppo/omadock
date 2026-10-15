@@ -321,7 +321,7 @@ Item {
           anchorRef: parent
           count: item.badgeView ? item.badgeView.count : item.notificationCount
           glyph: item.badgeView ? item.badgeView.glyph : ""
-          badgeColor: item.badgeView ? item.badgeView.color : ""
+          badgeColor: item.badgeView ? item.badgeView.color : "transparent"
           rim: Color.bar.background
         }
       ]

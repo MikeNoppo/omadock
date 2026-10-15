@@ -99,6 +99,24 @@ test("withTaskStatus and clearTaskStatusFor", () => {
   assert.equal(M.taskStatusFor(map, "foot", dockWithoutClaude), null)
 })
 
+test("a task never bleeds onto an app whose id merely contains its own", () => {
+  // foot and footclient are two separate terminal apps on the same desktop;
+  // a task filed under one must not badge the other. The alias bridge is the
+  // dot boundary only, which is what a reverse-DNS desktop id looks like.
+  const map = M.withTaskStatus({}, "foot", M.normalizeTaskStatus("foot", "done", 0, "cargo build", 3))
+  assert.ok(M.taskStatusFor(map, "foot"))
+  assert.equal(M.taskStatusFor(map, "footclient"), null)
+  assert.equal(M.taskStatusFor(map, "kitty"), null)
+
+  // The reverse-DNS form still reaches its bare name (both directions).
+  const rdn = M.withTaskStatus({}, "com.mitchellh.ghostty", M.normalizeTaskStatus("com.mitchellh.ghostty", "done", 0, "test", 1))
+  assert.ok(M.taskStatusFor(rdn, "ghostty"))
+  const bare = M.withTaskStatus({}, "ghostty", M.normalizeTaskStatus("ghostty", "done", 0, "test", 1))
+  assert.ok(M.taskStatusFor(bare, "com.mitchellh.ghostty"))
+  // ...and a separate id that only shares a prefix stays untouched.
+  assert.equal(M.taskStatusFor(bare, "ghostty-gui"), null)
+})
+
 test("resolveBadgeView: priorities and states", () => {
   const errTask = { status: "error", exitCode: 1, title: "test", duration: 1 }
   const runTask = { status: "running", exitCode: 0, title: "test", duration: 0 }

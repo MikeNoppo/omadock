@@ -115,7 +115,8 @@ Item {
   }
 
   // ------------------------------------------------- multi-monitor
-  // Multi-dock instance configuration and cross-dock shared state.
+  // DockHost sets forcedScreenName to pin this dock to a monitor, isPrimary on
+  // the one owning global side effects, and sharedState for a tile's origin monitor.
   property string forcedScreenName: ""
   property bool isPrimary: true
   property bool ipcEnabled: true

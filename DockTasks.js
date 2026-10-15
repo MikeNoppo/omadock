@@ -89,8 +89,10 @@ function isAppMatchSimple(idA, idB) {
   var a = stripDesktopId(idA).toLowerCase()
   var b = stripDesktopId(idB).toLowerCase()
   if (a === b) return true
-  if (a.indexOf(b) >= 0 || b.indexOf(a) >= 0) return true
-  return false
+  // A reverse-DNS desktop id (com.mitchellh.ghostty) matches its bare name
+  // (ghostty) only across a dot boundary: no substring aliasing, so a task
+  // filed under foot never badges the separate footclient app.
+  return a.length > b.length ? a.endsWith("." + b) : b.endsWith("." + a)
 }
 
 function hasDockApp(dockModel, targetId) {
@@ -161,7 +163,7 @@ function resolveBadgeView(notificationCount, taskInfo, activeMatch) {
     if (notif > 0) {
       return {
         glyph: "",
-        color: "",
+        color: "transparent",
         count: notif,
         mode: "count",
         status: ""
@@ -190,7 +192,7 @@ function resolveBadgeView(notificationCount, taskInfo, activeMatch) {
   if (notif > 0) {
     return {
       glyph: "",
-      color: "",
+      color: "transparent",
       count: notif,
       mode: "count",
       status: ""
@@ -199,7 +201,7 @@ function resolveBadgeView(notificationCount, taskInfo, activeMatch) {
 
   return {
     glyph: "",
-    color: "",
+    color: "transparent",
     count: 0,
     mode: "none",
     status: ""

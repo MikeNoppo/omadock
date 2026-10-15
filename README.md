@@ -46,7 +46,7 @@ Crafted in the spirit of **Omakase (おまかせ)**: wave magnification, live wi
 
 ### Architecture & Recognition
 
-Every release is backed by 239 Node.js unit tests, 116 Python checks, and nine sandboxed live Wayland integration suites. OmaDock's atomic asynchronous configuration gate (`CappedFileView.qml` and `tests/unit/test_capped_gate.py`) was independently selected for the **[XERJ Corpus Hub](https://github.com/xerj-org/xerj)** as a verified open-source reference implementation for AI coding agents.
+Every release is backed by 244 Node.js unit tests, 116 Python checks, and ten sandboxed live Wayland integration suites. OmaDock's atomic asynchronous configuration gate (`CappedFileView.qml` and `tests/unit/test_capped_gate.py`) was independently selected for the **[XERJ Corpus Hub](https://github.com/xerj-org/xerj)** as a verified open-source reference implementation for AI coding agents.
 
 ### Highlights
 
@@ -735,6 +735,14 @@ The pixel label font is [Silkscreen](https://fonts.google.com/specimen/Silkscree
 ## Changelog
 
 Full release notes, historical changelogs, and upgrade guides across all versions are available on [**GitHub Releases**](https://github.com/thepathless/omadock/releases).
+
+### v4.6.0 — 2026-10-15
+
+- **Developer Task HUD** — contributed by [@NothingManTR](https://github.com/NothingManTR) ([#67](https://github.com/thepathless/omadock/pull/67)): a dock tile now shows the progress of long-running terminal and CLI work. A blue `●` marks a command or AI coding agent that is still running, a green `✓` marks one that finished with exit code `0`, and a red `!` marks a failure — with a hover chip naming the command, how long it took and its exit code. The badge clears as soon as you focus the app, and work reported for a CLI tool that has no icon of its own falls back to its host terminal.
+- **`scripts/omadock-task.sh`** wraps any command (`omadock-task.sh cargo build --release`), reports directly over IPC (`reportTask`, `clearTask`, `taskStatus`) for hooks and shell prompts, and ships a `hook` mode for AI agent events.
+- **Zero background cost**: the HUD is pure event-driven IPC and reactive bindings — no polling timers, no background loops, still 0.00% idle CPU.
+- **Fixes on integration**: a task filed for one app can no longer badge a *different* app whose identifier merely contains it (`foot` vs `footclient`), while a reverse-DNS desktop id such as `com.mitchellh.ghostty` still reaches its bare name; the status colour is always a fully resolved colour, so a badge can never draw with an unresolved one.
+- **Verification**: 244 Node + 116 Python tests, `qmllint` 0 errors, plugin validate and manifest-check 0, smoke PASSED, and the live suites green — including a new `tests/live/tasks.sh` that drives the HUD end to end over IPC and reads the drawn badge back out of a running dock.
 
 ### v4.5.1 — 2026-10-14
 
