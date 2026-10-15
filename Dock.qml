@@ -121,7 +121,8 @@ Item {
   property bool isPrimary: true
   property bool ipcEnabled: true
   property QtObject sharedState: null
-  property var taskStatus: ({})
+  // Task status has one owner - the host's shared store; this is a read-only view of it.
+  readonly property var taskMap: (root.sharedState ? root.sharedState.taskStatus : null) || ({})
   property bool multiMonitor: false
   property bool perMonitorApps: true
   readonly property bool filterByMonitor: root.perMonitorApps && root.forcedScreenName !== ""
@@ -147,7 +148,6 @@ Item {
     function onMinimizedOriginsChanged() { root.pullSharedState() }
     function onParkedAtChanged() { root.pullSharedState() }
     function onParkSlotsChanged() { root.pullSharedState() }
-    function onTaskStatusChanged() { root.pullSharedState() }
   }
 
   function screenForName(name) { return screenLogic.screenForName(root, name) }

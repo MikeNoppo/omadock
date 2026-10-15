@@ -33,12 +33,9 @@ Item {
     return DockModel.groupBadgeTotal([item.appId], root.notificationBadges)
   }
 
-  readonly property var taskInfo: {
-    if (!root) return null
-    var ts = root.taskStatus ? root.taskStatus : (root.sharedState ? root.sharedState.taskStatus : null)
-    if (!ts) return null
-    return DockTasks.taskStatusFor(ts, item.appId, root.dockModel)
-  }
+  readonly property var taskInfo: root
+    ? DockTasks.taskStatusFor(DockModel, root.taskMap, item.appId, root.dockModel)
+    : null
 
   readonly property var badgeView: {
     return DockTasks.resolveBadgeView(item.notificationCount, item.taskInfo, item.isFocused)
@@ -650,23 +647,11 @@ Item {
                 height: Style.space(6)
                 radius: width / 2
                 anchors.verticalCenter: parent.verticalCenter
-                color: {
-                  if (!item.taskInfo) return "transparent"
-                  if (item.taskInfo.status === "error") return "#f38ba8"
-                  if (item.taskInfo.status === "running") return "#89b4fa"
-                  return "#a6e3a1"
-                }
+                color: DockTasks.statusColor(item.taskInfo ? item.taskInfo.status : "")
               }
 
               Text {
-                text: {
-                  if (!item.taskInfo) return ""
-                  var ti = item.taskInfo
-                  var title = ti.title ? ti.title : (ti.status === "error" ? "Task failed" : "Task completed")
-                  var dur = ti.duration > 0 ? " (" + ti.duration + "s)" : ""
-                  var code = (ti.status === "error" && ti.exitCode !== 0) ? " [Exit " + ti.exitCode + "]" : ""
-                  return title + dur + code
-                }
+                text: DockTasks.chipLabel(item.taskInfo)
                 textFormat: Text.PlainText
                 color: Util.alpha(Color.tooltip.text, 0.85)
                 font.family: Style.font.family

@@ -238,7 +238,7 @@ QtObject {
   function clearUrgentApp(root, appId, address) {
     root.clearNotificationBadgesFor(appId, address)
     if (root && root.sharedState && root.sharedState.taskStatus) {
-      root.sharedState.taskStatus = DockTasks.clearTaskStatusFor(root.sharedState.taskStatus, appId)
+      root.sharedState.taskStatus = DockTasks.clearTaskStatusFor(DockModel, root.sharedState.taskStatus, appId)
     }
     if (!root.urgentMap) return
     var hasKeys = false

@@ -11,11 +11,40 @@
 # Usage as direct IPC caller:
 #   scripts/omadock-task.sh report <appId> <status> <exitCode> <title> <duration>
 #   scripts/omadock-task.sh clear <appId>
+#   scripts/omadock-task.sh status
+#
+# Exit status:
+#   report/clear/status  the IPC call's own outcome. Non-zero, with the reason
+#                        on stderr, when the dock is not reachable.
+#   wrapped command      the wrapped command's own exit code. A report that
+#                        could not be delivered is shouted on stderr and does
+#                        NOT change it: the command's status is what a wrapper
+#                        exists to report.
+#
+# OMADOCK_SHELL_PATH overrides the shell config directory the IPC socket is
+# looked up under (default /usr/share/omarchy/shell), so a test can drive a
+# dock that is not the owner's.
+SHELL_PATH="${OMADOCK_SHELL_PATH:-/usr/share/omarchy/shell}"
 
+# 0 when a dock answers under $SHELL_PATH and exposes the IPC function $1.
+# `qs ipc call` prints "Function not found." to STDOUT and still exits 0, so
+# neither its output nor its status alone can be trusted.
+ipc_available() {
+  command -v qs >/dev/null 2>&1 || return 1
+  qs -p "$SHELL_PATH" ipc show 2>/dev/null | awk -v fn="$1" '
+    /^target / { on = ($2 == "omadock") }
+    on && $1 == "function" && index($2, fn "(") == 1 { found = 1 }
+    END { exit found ? 0 : 1 }'
+}
+
+# The one way this script talks to the dock. Says why on stderr and answers
+# non-zero rather than silently doing nothing.
 call_ipc() {
-  if command -v qs >/dev/null 2>&1; then
-    qs -p /usr/share/omarchy/shell ipc call omadock "$@" 2>/dev/null
+  if ! ipc_available "$1"; then
+    echo "omadock-task: omadock.$1 is not available under $SHELL_PATH - is the dock running?" >&2
+    return 1
   fi
+  qs -p "$SHELL_PATH" ipc call omadock "$@"
 }
 
 detect_terminal() {
@@ -131,22 +160,8 @@ case "$1" in
     call_ipc taskStatus
     exit $?
     ;;
-  hook)
-    shift
-    cat >/dev/null 2>&1
-    case "$1" in
-      pre)
-        call_ipc reportTask antigravity running 0 "Thinking..." 0 >/dev/null 2>&1
-        ;;
-      stop)
-        call_ipc reportTask antigravity success 0 "Ready" 0 >/dev/null 2>&1
-        ;;
-    esac
-    echo "{}"
-    exit 0
-    ;;
   "")
-    echo "Usage: omadock-task <command...> | report <args> | clear <appId> | hook <pre|stop>" >&2
+    echo "Usage: omadock-task <command...> | report <args> | clear <appId> | status" >&2
     exit 1
     ;;
 esac
@@ -167,7 +182,10 @@ DURATION=$(( END_TIME - START_TIME ))
 STATUS="done"
 [ "$EXIT_CODE" -ne 0 ] && STATUS="error"
 
-# Report final status
-call_ipc reportTask "$APP_ID" "$STATUS" "$EXIT_CODE" "$CMD_NAME" "$DURATION" >/dev/null 2>&1
+# Report final status. The report is a side channel: if it cannot be delivered
+# the wrapped command's own exit code still stands, but the failure is loud.
+if ! call_ipc reportTask "$APP_ID" "$STATUS" "$EXIT_CODE" "$CMD_NAME" "$DURATION" >/dev/null; then
+  echo "omadock-task: the task status was not reported to the dock (the command's exit code $EXIT_CODE stands)" >&2
+fi
 
 exit $EXIT_CODE
