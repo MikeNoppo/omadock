@@ -97,6 +97,7 @@ QtObject {
     root.minimizedOrigins = root.sharedState.minimizedOrigins || ({})
     root.parkedAt = root.sharedState.parkedAt || ({})
     root.parkSlots = root.sharedState.parkSlots || ({})
+    root.taskStatus = root.sharedState.taskStatus || ({})
     root._syncingShared = false
     root.modelTimerRef.restart()
   }

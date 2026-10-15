@@ -115,15 +115,12 @@ Item {
   }
 
   // ------------------------------------------------- multi-monitor
-  // Set by DockHost when one dock runs per monitor. forcedScreenName pins this
-  // instance to its monitor regardless of the "screen" config key; isPrimary
-  // marks the one dock that owns global side effects (alert sounds);
-  // sharedState carries parked-window bookkeeping across all docks so a tile
-  // lands on the monitor its window was minimized from, whichever dock did it.
+  // Multi-dock instance configuration and cross-dock shared state.
   property string forcedScreenName: ""
   property bool isPrimary: true
   property bool ipcEnabled: true
   property QtObject sharedState: null
+  property var taskStatus: ({})
   property bool multiMonitor: false
   property bool perMonitorApps: true
   readonly property bool filterByMonitor: root.perMonitorApps && root.forcedScreenName !== ""
@@ -149,6 +146,7 @@ Item {
     function onMinimizedOriginsChanged() { root.pullSharedState() }
     function onParkedAtChanged() { root.pullSharedState() }
     function onParkSlotsChanged() { root.pullSharedState() }
+    function onTaskStatusChanged() { root.pullSharedState() }
   }
 
   function screenForName(name) { return screenLogic.screenForName(root, name) }
