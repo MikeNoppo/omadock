@@ -17,6 +17,16 @@ import vm from "node:vm"
 // `findNotificationTargets(entries, rows, {app: spelling, ...}).map(e => e.appId)`
 // against the twelve-entry dock below, and every `cands` array is that tree's
 // `getCandidates(spelling)`.
+//
+// HOW MUCH OF THAT TABLE IS ACTUALLY LOAD-BEARING was measured by killing its
+// rules one at a time, not reasoned about. getCandidates() also splits an id on
+// dots and dashes, so for 26 of the 28 spellings the canonical name is in the
+// token set whatever cliAppId says: with the `claude-code -> claude` rule
+// deleted, every route in CASES is unchanged and all four tests below stay
+// green - which is the CORRECT outcome, since nothing observable moved. Only
+// the agy family depends on the table (`agy` splits to itself, so `antigravity`
+// can only arrive through cliAppId): with that one rule dead, route("agy") is
+// "" and three of the four tests fail, naming `agy` and `org.omarchy.agy`.
 
 const file = process.env.DOCKMODEL || new URL("../../DockModel.js", import.meta.url)
 const M = vm.createContext({})
@@ -110,6 +120,23 @@ test("the badge count for an id spelling is unchanged", () => {
   }
   for (const [spelling] of CASES)
     assert.deepEqual(host(M.notificationAliasIds(spelling)), TUI[spelling] || [spelling], spelling)
+})
+
+test("the canonical name reaches the candidate set wherever the split does not", () => {
+  // The table's only route into the notification path is the canonical name it
+  // contributes to getCandidates(). Where the generic dot/dash split already
+  // yields that name the table is redundant (measured above: killing those
+  // rules changes no route and keeps this file green); where it does not, the
+  // table is the only source - so these two spellings are pinned directly, and
+  // they are the ones that go red when the rule is removed.
+  for (const [spelling] of CASES) {
+    const cands = host(M.getCandidates(spelling))
+    const canon = M.cliAppId(spelling)
+    assert.ok(cands.includes(canon),
+      `${spelling}: candidates ${JSON.stringify(cands)} lost its canonical name ${canon}`)
+  }
+  assert.equal(M.cliAppId("agy"), "antigravity")
+  assert.equal(M.cliAppId("org.omarchy.agy"), "antigravity")
 })
 
 test("the two named pairs behave the same way in the notification path", () => {
