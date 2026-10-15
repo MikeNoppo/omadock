@@ -109,6 +109,17 @@ if isinstance(pins, list) and pins:
 else:
     conf["pinnedFolders"] = [{"path": sys.argv[4], "name": "Probe Folder", "icon": "folder"}]
     print("   config copy pinned %s for the folder-menu step" % sys.argv[4])
+# A group tile needs a group, and the desk's own are used when it has any. The
+# probe group starts empty; the fixture adds an app to it (through the dock's
+# own addAppToGroup) only while it is still empty, so the group popup has tiles
+# to draw on a desk that has no groups of its own.
+groups = conf.get("appGroups")
+if isinstance(groups, list) and groups:
+    print("   config copy keeps the %d app group(s) it inherited" % len(groups))
+else:
+    conf["appGroups"] = [{"id": "omadock_probe_group", "name": "Probe Group",
+                          "icon": "folder", "apps": [], "cols": 2, "before": ""}]
+    print("   config copy added a probe group for the group steps")
 json.dump(conf, open(sys.argv[2], "w"), indent=2)
 PY
 
@@ -217,7 +228,6 @@ probe_start || { echo "   FAIL: the probe never started" >&2; exit 1; }
 WORK="$PROBE_DIR/work"
 mkdir -p "$WORK"
 CFG=$(probe_cfg)
-CFG_MD5=$(md5sum "$CFG" | cut -d' ' -f1)
 # probe.sh checked its *source* (the suite's synthetic file); from here on it
 # must re-check the owner's own config, which is the one that must not move.
 PROBE_OWNER_CFG="$OWNER_CFG"
@@ -235,6 +245,29 @@ expect_true "the dock did not become visible on the headless output" "$revealed"
 probe=$(step probe) || fail "the probe's own ipc surface did not answer after reveal"
 expect_at_least "the revealed dock reports no items to click" "$probe" items 1
 note "revealed with $(jval "$probe" items) items, visible $(jval "$probe" visible)"
+
+# The preconditions this suite owns, supplied only where the desk cannot give
+# them: an app tile needs a running window (the compositor's, not the probe's)
+# or a pin, and a probe HOME carries neither. Nothing is added when the desk
+# already shows the real thing. The config baseline is taken *after* this: a pin
+# chosen here can legitimately re-anchor a group in the copy, and the assertions
+# below are about what the surfaces do, not about the fixture's preparation.
+prepare=$(step prepare) || fail "the prepare step did not answer"
+for _ in $(seq 20); do
+  [ "$(jval "$prepare" hadApp)" = "true" ] && break
+  sleep 0.25
+  prepare=$(step prepare) || fail "the prepare step did not answer"
+done
+if [ "$(jval "$prepare" pinned)" = "true" ]; then
+  note "no app tile on the headless dock: the fixture pinned $(jstr "$prepare" app)"
+else
+  note "the dock already shows an app tile; the fixture pinned nothing"
+fi
+[ "$(jval "$prepare" filled)" = "true" ] \
+  && note "the fixture's probe group was empty: $(jstr "$prepare" app) was put in it"
+[ "$(jval "$prepare" hadApp)" = "true" ] \
+  || note "still no app tile after the wait ($(jstr "$prepare" why))"
+CFG_MD5=$(md5sum "$CFG" | cut -d' ' -f1)
 
 # ------------------------------------------------------------ context menu
 echo
@@ -268,10 +301,12 @@ groupmenu=$(step context-group) || fail "the group context menu step did not ans
 if [ "$(jval "$groupmenu" ok)" != "true" ]; then
   fail "the group context menu did not open ($(jval "$groupmenu" why))"
 else
+  expect_eq "the group menu is not the one that was asked for" "$groupmenu" appId '"__app_group_context__"'
+  expect_eq "the group menu did not take the group that was clicked" "$groupmenu" groupData "$(jval "$groupmenu" id)"
   expect_true "the group menu's panel colour is not the shell's menu background" "$groupmenu" panelMatch
   expect_at_least "the group menu has almost no text in it" "$groupmenu" texts 5
   expect_empty "the group menu drew text with a colour that is not the theme's" "$groupmenu" foreign
-  note "group menu appId $(jval "$groupmenu" appId), texts $(jval "$groupmenu" texts)"
+  note "group menu on $(jval "$groupmenu" groupData), texts $(jval "$groupmenu" texts)"
 fi
 log_since "$MARK" "the group menu"
 step close >/dev/null
