@@ -39,6 +39,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
 SCREEN="omadock-probe"
 OWNER_CFG="${HOME}/.config/omarchy/omadock.json"
 SRC_CFG=$(mktemp "${TMPDIR:-/tmp}/omadock-interactions-cfg-XXXXXX") || exit 1
+# The folder step's precondition, owned by the suite: a directory a pinned
+# folder can point at. A pin is the only thing that puts a folder tile on the
+# dock (DockConfigLogic's ~/Downloads fallback runs only when the key is absent
+# entirely, not when it holds an empty list), so on a config that pins none the
+# step could never reach its target whatever the code did. The config copy
+# below pins this directory unless the source config already pins one of its
+# own, and the source file itself is never written.
+FOLDER_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omadock-interactions-folder-XXXXXX") || exit 1
 HAVE_OUTPUT=""
 fail=0
 fail() { echo "   FAIL: $*" >&2; fail=1; }
@@ -67,6 +75,7 @@ cleanup() {
   if declare -F probe_cleanup >/dev/null; then probe_cleanup >/dev/null 2>&1; fi
   [ -n "$HAVE_OUTPUT" ] && hyprctl output remove "$SCREEN" >/dev/null 2>&1
   rm -f "$SRC_CFG"
+  [ -n "$FOLDER_DIR" ] && rm -rf "$FOLDER_DIR"
 }
 trap cleanup EXIT
 
@@ -85,11 +94,21 @@ OWNER_DOCK=$(owner_dock_state)
 # The probe's config source: the owner's config, pinned to the headless output
 # and to a single dock. probe.sh copies this file and never reads the owner's
 # again, so the suite re-checks the real one itself at the end.
-python3 - "$OWNER_CFG" "$SRC_CFG" "$SCREEN" <<'PY' || exit 1
+python3 - "$OWNER_CFG" "$SRC_CFG" "$SCREEN" "$FOLDER_DIR" <<'PY' || exit 1
 import json, sys
 conf = json.load(open(sys.argv[1]))
 conf["screen"] = sys.argv[3]
 conf["multiMonitor"] = False
+# The copy must carry a pinned folder for the folder-menu step, and it may not
+# borrow one from a desktop that has none. The source config stays the source
+# of everything else - its look, its groups, its app list - so the probe still
+# renders like the owner's dock; only a missing precondition is supplied.
+pins = conf.get("pinnedFolders")
+if isinstance(pins, list) and pins:
+    print("   config copy keeps the %d pinned folder(s) it inherited" % len(pins))
+else:
+    conf["pinnedFolders"] = [{"path": sys.argv[4], "name": "Probe Folder", "icon": "folder"}]
+    print("   config copy pinned %s for the folder-menu step" % sys.argv[4])
 json.dump(conf, open(sys.argv[2], "w"), indent=2)
 PY
 
