@@ -65,8 +65,6 @@ QtObject {
   function handleDragMoved(root, card, aid, mx, my) {
     if (!root) return
     root.dropBeforeId = ""
-    root.dropTargetAppId = ""
-    root.dropTargetGroupId = ""
     root.dragPointerX = mx
     root.dragPointerY = my
     var lift = cardWrapper.liftOf()
@@ -76,37 +74,38 @@ QtObject {
     // the running apps; a running app that is not pinned stays.
     root.dragRemoveArmed = root.dragSourceGroupId === "" && DockModel.isPinned(root.pinnedIds, aid)
       && (cardWrapper.offDockAt(my) || cardWrapper.overRunningAt(mx - card.row.x))
-    if (root.dragRemoveArmed) return
+    if (root.dragRemoveArmed) {
+      if (lift) lift.dwell("")
+      return
+    }
 
-    // Over the middle of a group: add to it. Over the middle of another
-    // pinned app: make a group of the two. Otherwise a place in the run.
+    // Over the middle half of a group or of another pinned app nothing
+    // moves; held there a moment (DockLift.dwell) it becomes the target:
+    // the group takes the app, or the two apps make one. Let go before,
+    // the element lands where its gap stands.
     var rx = mx - card.row.x
     var slots = card.liveSlots(card.pinnedRowRepeater)
     var n = slots.length
+    var over = ""
     for (var i = 0; i < n; i++) {
       var slot = slots[i]
       var it = slot.child.item
       if (!it || slot.lifted) continue
-      // A tile with a label (or a plate) is one button: its whole width is
-      // the target, with the edges left for placing before or after it.
-      // Past the room an open drop gap adds before it.
       var lead = it.dropGap || 0
-      var centre = slot.x + lead + (slot.width - lead) / 2
+      var left = slot.x + lead
       var span = slot.width - lead
-      if (slot.child.isGroup) {
-        if (Math.abs(rx - centre) < span * 0.45) {
-          root.dropTargetGroupId = it.groupId
-          root.dropRowIndex = -1
-          return
-        }
-      } else if (it.appId !== aid && Math.abs(rx - centre) < span * 0.38) {
-        root.dropTargetAppId = it.appId
-        root.dropRowIndex = -1
-        return
-      }
+      if (rx <= left + span * 0.25 || rx >= left + span * 0.75) continue
+      if (slot.child.isGroup) over = "group:" + it.groupId
+      else if (it.appId !== aid) over = "app:" + it.appId
+      break
+    }
+    if (lift) lift.dwell(over)
+    else {
+      root.dropTargetAppId = ""
+      root.dropTargetGroupId = ""
     }
 
-    var idx = cardWrapper.rowInsertIndex(rx)
+    var idx = stickyRowIndex(root, card, rx)
     // Past the end of the run, a running app that is not pinned lands after
     // the last item only while the pointer stays next to it: further right
     // it is over the running apps, its own place, where letting go does
@@ -125,6 +124,39 @@ QtObject {
         break
       }
     }
+  }
+
+  // The drop index in a run of slots for a pointer at x, kept where it is
+  // until the pointer has gone three quarters of the way over the next
+  // element (or back over the previous one): that neighbour then moves
+  // once, into the place the gap leaves, away from the pointer, instead of
+  // stepping aside as soon as the pointer reaches its edge. `cur` < 0 (no
+  // place yet) takes `fresh`. leadOf gives the room an open gap adds
+  // before a slot's element.
+  function stickyIndex(root, slots, x, cur, fresh, leadOf) {
+    var n = slots.length
+    if (cur < 0 || cur > n) return fresh
+    function edge(slot, f) {
+      var lead = leadOf(slot)
+      return slot.x + lead + (slot.width - lead) * f
+    }
+    for (var guard = 0; guard <= n; guard++) {
+      var next = -1
+      for (var a = cur; a < n; a++) if (!slots[a].lifted) { next = a; break }
+      if (next >= 0 && x > edge(slots[next], 0.75)) { cur = next + 1; continue }
+      var prev = -1
+      for (var b = cur - 1; b >= 0; b--) if (!slots[b].lifted) { prev = b; break }
+      if (prev >= 0 && x < edge(slots[prev], 0.25)) { cur = prev; continue }
+      break
+    }
+    return cur
+  }
+
+  function stickyRowIndex(root, card, rx) {
+    var slots = card.liveSlots(card.pinnedRowRepeater)
+    if (slots.length === 0) return -1
+    return stickyIndex(root, slots, rx, root.dropRowIndex, cardWrapper.rowInsertIndex(rx),
+      function(slot) { return slot.child.item ? (slot.child.item.dropGap || 0) : 0 })
   }
 
   // Insert index in the pinned run for a pointer at row x: before the first
@@ -146,7 +178,13 @@ QtObject {
   function handleDragDropped(root, card, aid) {
     if (!root) return
     var lift = cardWrapper.liftOf()
+    // Out of an opened group the copy is the app's icon (DockLift.beginIcon):
+    // the room its gap holds goes to the app's new slot, so a drop that
+    // pins it lands at once; any other lets the gap ease shut.
+    var fromPopup = !!lift && lift.iconCopy
+    var pinsIt = root.dropTargetGroupId === "" && root.dropTargetAppId === ""
     if (lift) lift.drop()
+    if (fromPopup && !pinsIt) lift.snapping = false
     var dragId = root.dragAppId
     var targetGroupId = root.dropTargetGroupId
     var targetAppId = root.dropTargetAppId
@@ -162,9 +200,13 @@ QtObject {
     root.dropRowIndex = -1
     root.dragRemoveArmed = false
 
-    // Where the dragged copy lands: the app's slot after the drop, unless it
-    // went into a group or off the dock.
-    var fade = removeArmed || targetGroupId !== "" || (targetAppId !== "" && targetAppId !== dragId)
+    // Where the dragged copy lands: the app's slot after the drop, or into
+    // the group it went into; off the dock it fades.
+    var fade = removeArmed
+    var intoKey = ""
+    var hadKeys = {}
+    var keysThen = root.pinnedRowKeys
+    for (var hk = 0; hk < keysThen.length; hk++) hadKeys[keysThen[hk]] = true
     if (dragId !== "" && removeArmed) {
       root.dragSourceGroupId = ""
       root.togglePin(dragId)
@@ -172,16 +214,20 @@ QtObject {
       if (sourceGroupId !== "") {
         if (targetGroupId === sourceGroupId) {
           root.dragSourceGroupId = ""
+          if (lift) lift.settle("pin:group:" + sourceGroupId, false, true)
           root.syncVisibility()
           return
         }
+        if (fromPopup) lift.handOff([], lift.heldGapSum)
         root.removeAppFromGroup(sourceGroupId, dragId)
       }
 
       if (targetGroupId !== "") {
         root.addAppToGroup(targetGroupId, dragId)
+        intoKey = "pin:group:" + targetGroupId
       } else if (targetAppId !== "" && targetAppId !== dragId) {
-        root.createAppGroupFromDrop(targetAppId, dragId)
+        var made = root.createAppGroupFromDrop(targetAppId, dragId)
+        if (made) intoKey = "pin:group:" + made
       } else {
         var rowNow = root.pinnedRow
         if (sourceGroupId !== "") {
@@ -205,11 +251,18 @@ QtObject {
           if (nextRow !== rowNow) root.applyPinnedRow(nextRow)
         }
       }
+      if (fromPopup && sourceGroupId !== "") {
+        var appKey = "app:" + dragId
+        lift.handOn((!hadKeys[appKey] && root.pinnedRowKeys.indexOf(appKey) >= 0) ? ["pin:" + appKey] : [])
+      }
       root.dragSourceGroupId = ""
     } else {
       root.dragSourceGroupId = ""
     }
-    if (lift) lift.settle(DockModel.isPinned(root.pinnedIds, aid) ? "pin:app:" + aid : "run:" + aid, fade)
+    if (lift) {
+      if (intoKey !== "") lift.settle(intoKey, false, true)
+      else lift.settle(DockModel.isPinned(root.pinnedIds, aid) ? "pin:app:" + aid : "run:" + aid, fade)
+    }
     root.syncVisibility()
   }
 
@@ -240,7 +293,8 @@ QtObject {
       root.dropFolderIndex = -1
       return
     }
-    var idx = cardWrapper.folderInsertIndex(rx)
+    var idx = stickyIndex(root, folders, fx, root.dropFolderIndex, cardWrapper.folderInsertIndex(rx),
+      function(slot) { return slot.child.gapWidth || 0 })
     root.dropFolderIndex = idx
   }
 
@@ -275,7 +329,7 @@ QtObject {
     var lift = cardWrapper.liftOf()
     if (lift) lift.move(mx, my)
     root.dragRemoveArmed = cardWrapper.offDockAt(my)
-    var idx = root.dragRemoveArmed ? -1 : cardWrapper.rowInsertIndex(mx - card.row.x)
+    var idx = root.dragRemoveArmed ? -1 : stickyRowIndex(root, card, mx - card.row.x)
     root.dropRowIndex = idx
   }
 
