@@ -5,7 +5,8 @@ import qs.Commons
 // drives). With split sections the slot is the gap between two panels and
 // draws no line. It narrows to nothing and fades its line when its section
 // goes (DockMotion), and stays in the row while it has width, so a split
-// panel narrows with it instead of vanishing in one frame.
+// panel narrows with it instead of vanishing in one frame. A hidden divider
+// (separatorWidth below zero) never has width: it leaves the row.
 Item {
   id: divider
 
@@ -51,7 +52,8 @@ Item {
   // The line, placed by the card (70% of its height by default, as on
   // macOS). It overflows the slot, so it does not grow the row.
   Rectangle {
-    visible: !divider.lineHidden
+    // "Hidden" dividers keep the gap between sections and draw no line.
+    visible: !divider.lineHidden && !!divider.root && divider.root.dividerStyle !== "none"
     anchors.horizontalCenter: parent.horizontalCenter
     y: divider.root && divider.root.dividerGeometry === "long" && divider.cardRef
       ? divider.cardRef.dividerTop - divider.rowY - divider.y : (divider.root ? divider.root.iconCenterOffset : 0)
