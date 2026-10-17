@@ -17,6 +17,61 @@ Item {
   property bool shown: true
   readonly property bool wanted: slot.shown && !slot.leaving
 
+  // A drag inside the dock picks the element up (DockLift). Its slot gives
+  // up exactly the room the drop gaps take (DockLift.gapSum), at most
+  // itself and the row spacing after it, so the dock keeps its width while
+  // the element is held and while it settles; where no gap opens its room
+  // stays empty. Dropped into another run, a group or off the dock, the
+  // slot eases shut from the room it had left. The slot the drop lands in
+  // shows its element only once the dragged copy has settled there.
+  property string liftKey: ""
+  readonly property var lift: (root && root.dockCard) ? root.dockCard.liftRef : null
+  readonly property bool lifted: slot.liftKey !== "" && !!slot.lift && slot.lift.key === slot.liftKey
+  readonly property bool liftSource: slot.liftKey !== "" && !!slot.lift && slot.lift.phase !== "" && slot.lift.sourceKey === slot.liftKey
+  readonly property bool landing: slot.liftKey !== "" && !!slot.lift && slot.lift.landKey === slot.liftKey
+  property bool _exiting: false
+  property real _kept: 0
+  onLeavingChanged: {
+    if (slot.leaving && slot.lift && slot.lift.handsOff(slot.liftKey)) {
+      // Its room goes to the slots that take its place (DockLift.handOn).
+      slot.lift.noteHanded(slot.liftKey, slot.visible ? slot.width + slot._spacing : 0)
+      slot._start(0)
+    } else if (slot.leaving && slot.liftSource) {
+      slot._kept = Math.min(slot.lift.heldGapSum, slot.full + slot._spacing)
+      slot._exiting = true
+      // Without layout motion (Reduced) its room goes at once.
+      if (!(slot.motion && slot.motion.layout)) slot._start(0)
+    } else if (!slot.leaving) {
+      slot._exiting = false
+    }
+  }
+  // The dock's rows all space their elements by gapWidth.
+  readonly property real _spacing: root ? root.gapWidth : 0
+  readonly property real _given: slot._exiting ? slot._kept * slot.appear + slot._spacing * (1 - slot.appear)
+    : slot.liftSource ? Math.min(slot.lift.gapSum, slot.full + slot._spacing) : 0
+
+  // Taking others' place (DockLift.handOn): until it settles the slot
+  // stands at its share of their room; then it eases from there (_base) to
+  // its own width. Taking one element's place it swaps in whole (_swap).
+  readonly property var _handIn: (!slot._settled && slot.liftKey !== "" && slot.lift) ? slot.lift.handTo[slot.liftKey] : undefined
+  property real _base: 0
+  property bool _swap: false
+  property bool _handed: false
+  readonly property bool _swapping: slot._handIn ? slot._handIn.n === 1 : slot._swap
+  onAppearChanged: if (slot.appear >= 1) { slot._base = 0; slot._swap = false; slot._handed = false }
+
+  // A pulse when the dragged copy has gone into this slot (a group).
+  property real _pulse: 1
+  Connections {
+    target: slot.lift
+    function onAbsorbed(key) { if (key === slot.liftKey && slot.motion && slot.motion.scale) pulseMotion.restart() }
+  }
+  SequentialAnimation {
+    id: pulseMotion
+    NumberAnimation { target: slot; property: "_pulse"; to: 1.12; duration: slot.motion ? slot.motion.fast / 2 : 0; easing.type: Easing.OutQuad }
+    NumberAnimation { target: slot; property: "_pulse"; to: 1; duration: slot.motion ? slot.motion.base : 0; easing.type: Easing.OutBack }
+  }
+
   default property alias content: holder.data
   readonly property Item child: holder.children.length > 0 ? holder.children[0] : null
 
@@ -31,7 +86,10 @@ Item {
     enabled: !slot._snap && !!slot.motion && slot.motion.base > 0
     NumberAnimation {
       duration: slot.motion ? slot.motion.base : 0
-      easing.type: appearMotion.targetValue > 0.5 ? Easing.OutCubic : Easing.InCubic
+      // The empty room a dropped element leaves (its content hidden) closes
+      // on the curve the slots taking its room open on, so the dock's width
+      // moves one way.
+      easing.type: (appearMotion.targetValue > 0.5 || slot._exiting) ? Easing.OutCubic : Easing.InCubic
     }
   }
   // A write past the Behavior.
@@ -47,8 +105,19 @@ Item {
   Component.onCompleted: {
     slot._start(0)
     Qt.callLater(function() {
+      var h = slot._handIn
+      if (h && slot.fresh && slot.wanted) {
+        slot._base = slot.lift.handBase(slot.liftKey)
+        slot._swap = h.n === 1
+        slot._handed = true
+        slot._settled = true
+        slot.lift.handTaken(slot.liftKey)
+        slot._start(0)
+        slot.appear = 1
+        return
+      }
       slot._settled = true
-      if (!slot.fresh) slot._start(slot.wanted ? 1 : 0)
+      if (!slot.fresh || slot.landing) slot._start(slot.wanted ? 1 : 0)
       else slot.appear = slot.wanted ? 1 : 0
     })
   }
@@ -61,10 +130,19 @@ Item {
     else slot.appear = slot.wanted ? 1 : 0
   }
 
-  readonly property real full: slot.child ? slot.child.width : 0
-  width: (slot.motion && slot.motion.layout) ? slot.full * slot.appear : (slot.appear > 0.001 ? slot.full : 0)
+  // A landing tile is at least what the gap held for it: its label settles
+  // a frame after the tile is made.
+  readonly property real full: !slot.child ? 0 : slot.landing ? Math.max(slot.child.width, slot.lift.liftWidth) : slot.child.width
+  // The slot a drop lands in stands open from its first frame, before its
+  // roles (and `appear`) have arrived.
+  // A slot handed room eases from that room instead (_base).
+  readonly property real _shownAppear: (slot.landing && slot._base <= 0 && !slot._handIn) ? 1 : slot.appear
+  readonly property bool _eases: slot._exiting || (!!slot.motion && slot.motion.layout)
+  width: (slot._handIn ? (slot._eases ? slot.lift.handBase(slot.liftKey) : slot.full)
+    : slot._eases ? slot._base + (slot.full - slot._base) * slot._shownAppear
+    : (slot._shownAppear > 0.001 || slot._handed ? slot.full : 0)) - slot._given
   height: slot.child ? slot.child.height : 0
-  visible: slot.appear > 0.001
+  visible: slot._shownAppear > 0.001 || !!slot._handIn || slot._handed
   // A zoomed element raises itself over its neighbours; in the Row that
   // takes the slot's z.
   z: slot.child ? slot.child.z : 0
@@ -74,10 +152,10 @@ Item {
     width: slot.full
     height: slot.height
     x: Math.round((slot.width - slot.full) / 2)
-    opacity: slot.appear
+    opacity: (slot.landing || slot._exiting) ? 0 : slot._swapping ? 1 : slot.appear
     // A leaving element takes no clicks, hovers or drops during its exit.
     enabled: slot.wanted
-    scale: (slot.motion && slot.motion.scale) ? 0.6 + 0.4 * slot.appear : 1
+    scale: ((slot.motion && slot.motion.scale && !slot._swapping) ? 0.6 + 0.4 * slot.appear : 1) * slot._pulse
     transformOrigin: Item.Bottom
   }
 }
