@@ -1,10 +1,12 @@
 import QtQuick
+import "../strings"
 import "../../DockModel.js" as DockModel
 import "../../DockPresets.js" as DockPresets
 import "../../Buttons.js" as Buttons
 import "../../DockLabels.js" as DockLabels
 import "../../DockLayout.js" as DockLayout
 import "../../DockMotion.js" as DockMotion
+import "../../DockFloating.js" as DockFloating
 
 // Config and preset logic, extracted from Dock.qml so the root file only
 // declares state and wiring. Every function is stateless: the dock root is
@@ -122,6 +124,7 @@ QtObject {
     root.autohide = parsed && parsed.autohide !== false
     root.intelligentAutohide = parsed && parsed.intelligentAutohide !== false
     root.showAppsButton = parsed && parsed.showAppsButton !== false
+    if (root.sharedState) root.sharedState.appGrid.mode = (parsed && parsed.appsButtonAction === "grid") ? "grid" : "menu"
     root.showTooltips = parsed && parsed.showTooltips !== false
     root.showMinimizedTiles = parsed ? parsed.showMinimizedTiles !== false : true
     root.advancedTooltips = parsed && parsed.advancedTooltips !== false
@@ -140,6 +143,7 @@ QtObject {
       root.minimizeMode = "active"
     }
     root.restoreWorkspace = (parsed && parsed.restoreWorkspace === "origin") ? "origin" : "current"
+    root.floatingWatch.choice = DockFloating.normalizeChoice(parsed ? parsed.floatingDock : "")
     root.restoreSlot = !!(parsed && parsed.restoreSlot === true)
     root.keepPointer = parsed ? parsed.keepPointer !== false : true
     root.animations = DockMotion.normalizeLevel(parsed ? parsed.animations : "full")
@@ -187,6 +191,7 @@ QtObject {
     conf.autohide = root.autohide
     conf.intelligentAutohide = root.intelligentAutohide
     conf.showAppsButton = root.showAppsButton
+    if (root.sharedState) conf.appsButtonAction = root.sharedState.appGrid.mode
     conf.showTooltips = root.showTooltips
     conf.showMinimizedTiles = root.showMinimizedTiles
     conf.hoverEffect = root.hoverEffect
@@ -240,6 +245,7 @@ QtObject {
     conf.minimizeMode = root.minimizeMode
     conf.clickToMinimize = root.minimizeMode !== "off"
     conf.restoreWorkspace = root.restoreWorkspace
+    conf.floatingDock = root.floatingWatch.choice
     conf.restoreSlot = root.restoreSlot
     conf.keepPointer = root.keepPointer
     conf.animations = root.animations
@@ -310,8 +316,8 @@ QtObject {
 
   function nextPresetName(root) {
     for (var n = 1; n <= DockModel.MAX_PRESETS + 1; n++)
-      if (!presetNameTaken(root, "Preset " + n, "")) return "Preset " + n
-    return "Preset"
+      if (!presetNameTaken(root, Tr.t("presets.numbered", "Preset %1").arg(n), "")) return Tr.t("presets.numbered", "Preset %1").arg(n)
+    return Tr.t("presets.default", "Preset")
   }
 
   function replacePreset(root, i, preset) {

@@ -52,6 +52,7 @@ var SETTINGS_SEARCH = [
   { key: "panelSpacing", page: "appearance", label: "Panel spacing", terms: ["gap", "split"] },
   { key: "indicators", page: "appearance", label: "Indicators", terms: ["dots", "bars", "running", "shape"] },
   { key: "appsButton", page: "appearance", label: "Omarchy button", terms: ["launcher", "start", "menu", "logo"] },
+  { key: "appsButtonAction", page: "appearance", label: "Omarchy button opens", terms: ["launcher", "app grid", "apps", "menu", "drag", "pin"] },
   { key: "removableDrives", page: "appearance", label: "Removable drives", terms: ["usb", "media", "eject"] },
   { key: "iconStyle", page: "icons", label: "Icon style", terms: ["pixel", "pixel style", "mono", "monochrome", "dots", "dot matrix", "original"] },
   { key: "iconTint", page: "icons", label: "Icon colour", terms: ["color", "tint", "bw", "black", "white", "accent"] },
@@ -73,6 +74,7 @@ var SETTINGS_SEARCH = [
   { key: "grain", page: "motion", label: "Grain", terms: ["noise", "film", "texture"] },
   { key: "autohide", page: "behavior", label: "Autohide", terms: ["hide", "reveal", "visibility", "intelligent"] },
   { key: "revealDelay", page: "behavior", label: "Reveal delay", terms: ["autohide", "delay"] },
+  { key: "floatingDock", page: "behavior", label: "Floating workspaces", terms: ["omarchy dock", "floating", "layout", "hide", "super l"] },
   { key: "minimizeMode", page: "behavior", label: "Minimize on click", terms: ["park", "click"] },
   { key: "restoreWorkspace", page: "behavior", label: "Restore on", terms: ["minimize", "park", "windows", "origin"] },
   { key: "restoreSlot", page: "behavior", label: "Restore original slot", terms: ["minimize", "park", "position", "layout"] },
@@ -120,19 +122,24 @@ var SETTINGS_SEARCH = [
 // Ranked search over SETTINGS_SEARCH (or any entry list in the same shape).
 // Every query character must land in order on some term; the best-scoring
 // term of each entry is its score.
-function searchSettings(query, entries, limit) {
+// translate(entry), when given, is the label in the dock's language
+// (SettingsPanel.searchLabel): a query matches it as well as the English
+// label and terms, and the hit carries it.
+function searchSettings(query, entries, limit, translate) {
   var list = entries == null ? SETTINGS_SEARCH : entries
   var cap = limit == null ? 8 : limit
   var out = []
   for (var i = 0; i < list.length; i++) {
     var e = list[i]
+    var shown = translate ? translate(e) : e.label
     var best = fuzzyScore(query, e.label)
+    if (shown !== e.label) best = Math.max(best, fuzzyScore(query, shown))
     var terms = e.terms || []
     for (var j = 0; j < terms.length; j++) {
       var s = fuzzyScore(query, terms[j])
       if (s > best) best = s
     }
-    if (best >= 0) out.push({ key: e.key, page: e.page, label: e.label, score: best })
+    if (best >= 0) out.push({ key: e.key, page: e.page, label: shown, score: best })
   }
   out.sort(function (a, b) { return b.score - a.score })
   return out.slice(0, cap)

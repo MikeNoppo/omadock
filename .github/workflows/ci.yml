@@ -25,7 +25,7 @@ jobs:
           python-version: "3.12"
 
       - name: DockModel syntax
-        run: node --check DockModel.js && node --check DockLabels.js && node --check DockLayout.js && node --check DockMarks.js && node --check DockMarkGeometry.js && node --check DockPresets.js && node --check DockIcons.js && node --check DockOutput.js && node --check DockMotion.js && node --check DockKeys.js && node --check DockFit.js && node --check DockTasks.js
+        run: node --check DockModel.js && node --check DockLabels.js && node --check DockLayout.js && node --check DockMarks.js && node --check DockMarkGeometry.js && node --check DockPresets.js && node --check DockIcons.js && node --check DockOutput.js && node --check DockMotion.js && node --check DockKeys.js && node --check DockFit.js && node --check DockTasks.js && node --check DockFloating.js && node --check DockGridDrop.js && node --check Buttons.js && node --check Plan.js && node --check SettingsSearch.js
 
       - name: Node test suites
         run: node --test tests/unit/*.test.js tests/unit/*.test.mjs
@@ -35,6 +35,11 @@ jobs:
 
       - name: Python test suites
         run: python3 -m unittest discover -s tests/unit -p 'test_*.py'
+
+      # Every translatable string has its English entry (i18n/en.json); a
+      # new settings row or Tr.t call without one fails here.
+      - name: Translation catalog
+        run: python3 tests/static/i18n-en.py --check
 
       # Marketplace review rules: PlainText only, no eval, no data spliced
       # into shell commands, no inline python; lists hyprctl eval and

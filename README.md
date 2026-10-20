@@ -84,6 +84,12 @@ omarchy plugin update omadock --yes
 omarchy plugin remove omadock --yes
 ```
 
+On Omarchy 4.5+ OmaDock switches Omarchy's own dock off by default (Settings → Behavior → Floating workspaces). Bring it back after removing OmaDock:
+
+```bash
+omarchy plugin enable omarchy.dock
+```
+
 ---
 
 ## Features
@@ -486,6 +492,7 @@ Settings persist in `~/.config/omarchy/omadock.json` and are editable live:
 | `perMonitorApps` | `bool` | `true` | With `multiMonitor`, each dock lists only the windows on its own monitor. |
 | `autohide` | `bool` | `true` | Enables dock autohiding on hover exit. |
 | `intelligentAutohide` | `bool` | `true` | Hides dock only when windows overlap its bounding box (AABB). |
+| `floatingDock` | `string` | `"hide-omarchy"` | Omarchy 4.5+, which shows its own dock on floating workspaces (Super+L): `"hide-omarchy"` switches it off (`omarchy plugin disable omarchy.dock`), `"hide-omadock"` switches it on and hides OmaDock on floating workspaces, `"both"` leaves it alone. Settings → Behavior → Floating workspaces. |
 | `showRemovableDrives` | `bool` | `true` | Auto-detect and display removable USB thumb drives and storage. |
 | `warnUnsafeRemoval` | `bool` | `true` | Notify when a drive is pulled out while still mounted (it was not ejected first). |
 | `appGroups` | `array` | `[]` | App Folders / Groups configuration (name, custom icon, app ID list). |
@@ -532,6 +539,7 @@ Settings persist in `~/.config/omarchy/omadock.json` and are editable live:
 | `labelMaxWidth` | `int` | `140` | Longest label in px (80–240) before the name is shortened. |
 | `labelNames` | `object` | `{}` | Per-app label text, `{ "appId": "Name" }` (up to 200 entries, 40 characters each). |
 | `keepPointer` | `bool` | `true` | Focusing a window from the dock keeps the pointer where it is instead of warping it to the window centre. |
+| `appsButtonAction` | `string` | `"menu"` | What the Omarchy button opens: `"menu"` (the Omarchy menu) or, on Omarchy 4.5+, `"grid"`: Omarchy's own app grid (search, keyboard, Keep in dock), from which an app dragged onto the dock is pinned where it is dropped. Settings → Appearance → Omarchy button opens. |
 | `animations` | `string` | `"full"` | How the dock moves: `"full"` (items, dividers, popups, marks and the badge ease in and out), `"reduced"` (short fades only: no movement, bounces or label typing) or `"off"` (everything changes at once). Settings → Motion & Effects → Animations. |
 | `folderColor` | `string` | `"theme"` | `"theme"`, `"symbolic"`, `"white"`, `"black"`, `"Yaru-blue"`, etc. |
 | `hoverEffect` | `string` | `"zoom"` | Hover mode: magnification `"zoom"` or `"wave"`; effects `"lift"`, `"glow"`, `"glitch"` (shaders); or `"off"`. |
@@ -547,6 +555,30 @@ Settings persist in `~/.config/omarchy/omadock.json` and are editable live:
 | `sectionSpacing` | `number` | `18` | Gap between sections in pixels (0–48px). |
 
 ---
+
+## Translations
+
+On **Omarchy 4.5+** the dock speaks the language picked under **Setup → Language** (or `omarchy language <code>`) and switches with it live, no restart. It ships **English** and **Polish**. On Omarchy 4.0 there is no language mechanism, so the dock stays in English; it has no language setting of its own on purpose.
+
+### How it works
+
+- `components/strings/Tr.qml` creates Omarchy's `Commons.Translations` by name, pointed at `i18n/`. A shell without it (4.0) just gets the English text every call carries.
+- Catalogs are flat JSON files in `i18n/`, one per Omarchy language code: `en.json`, `pl.json`, and so on (`de`, `pt-BR`, `zh-CN`, …; the list is in `$OMARCHY_PATH/default/i18n/locales.json`). A string missing from a catalog falls back to its base language (`pt-BR` to `pt`), then to English, so a partial translation works.
+- A value is a string, or an object of plural forms keyed by CLDR category for strings that count: `{ "one": "%1 aplikacja", "few": "%1 aplikacje", "many": "%1 aplikacji", "other": "%1 aplikacji" }`. `%1`, `%2` are filled in by the code and must stay.
+
+### Adding a language
+
+1. Copy `i18n/en.json` to `i18n/<code>.json` (the code Omarchy uses for that language).
+2. Translate the values; leave the keys, the `%N` placeholders, and anything you do not want to translate yet (delete such lines rather than leaving English in them). For counted strings, give the plural forms your language needs, always including `other`.
+3. Use the terms Omarchy's own catalog uses (`$OMARCHY_PATH/default/i18n/<code>/shell.json`) so the dock reads like the rest of the shell.
+4. Check it: `node --test tests/unit/i18n.test.mjs` (keys and placeholders match English), then `omarchy language <code>` and look through the settings panel and the menus.
+
+### Adding or changing strings
+
+- In QML: `Tr.t("menu.unpin", "Unpin from Dock")`, with `.arg()` for placeholders, or `Tr.tn("menu.groupApps", n, n === 1 ? "%1 App" : "%1 Apps").arg(n)` for counts. Import it with `import "strings"` (from `components/`) or `import "../strings"`.
+- Settings rows with a `key` translate themselves (`setting.<key>.label`, `.hint`, `.option.<value>`), and `SectionLabel { title: "…" }` too (`section.<slug>`). Only a row whose text changes at run time needs explicit `Tr.t` calls.
+- JS modules cannot see `Tr`: pass the translator in (see `DockTasks.chipLabel`).
+- Then run `python3 tests/static/i18n-en.py` to add the new English entries to `i18n/en.json` (CI runs it with `--check`), and add the translations to the other catalogs.
 
 ## IPC & Keyboard Shortcuts
 
@@ -705,6 +737,8 @@ qs -p /usr/share/omarchy/shell ipc call omadock restoreLast
 | `DockModel.js` | Pure model logic and every safety bound (parsing caps, identity resolution). |
 | `components/` | QML UI components (dock items, popups, tooltips, shaders) and `SettingsPanel.qml`, the settings shell (sidebar, search, page assembly). |
 | `components/settings/` | The settings module: one file per settings page plus the shared row family (`SettingRow`, `SwitchRow`, `ChoiceRow`, `SliderRow`, `Swatch`, `SectionLabel`). Pages wire `root` (the Dock) into rows; the panel owns search-jump state and registers rows by their `key`. |
+| `components/strings/` | `Tr`, the translation singleton (Omarchy 4.5's `Commons.Translations`, created by name). |
+| `i18n/` | Translation catalogs, one JSON file per language code; `en.json` holds every key (see [Translations](#translations)). |
 | `scripts/` | Python helpers (folder/drive scans, notification watcher, keybinding setup) plus `bind-keys.sh`. |
 | `shaders/` | Hover/icon-style fragment shaders with precompiled `.qsb` bundles. |
 | `tests/unit/` | Node and Python unit suites — what CI runs on every PR. |
@@ -735,6 +769,15 @@ The pixel label font is [Silkscreen](https://fonts.google.com/specimen/Silkscree
 ## Changelog
 
 Full release notes, historical changelogs, and upgrade guides across all versions are available on [**GitHub Releases**](https://github.com/thepathless/omadock/releases).
+
+### v4.8.0 — 2026-10-21
+
+OmaDock meets Omarchy 4.5: floating workspaces get one dock, the Omarchy button opens the app grid, and the dock speaks your language.
+
+- **Choose which dock floating workspaces get** — contributed by [@priard](https://github.com/priard) ([#72](https://github.com/thepathless/omadock/pull/72)): Omarchy 4.5 brings floating workspaces (Super+L) and its own dock on them. New **Settings → Behavior → Floating workspaces**: *Hide Omarchy dock* (default — OmaDock everywhere), *Hide OmaDock* (Omarchy's dock on floating workspaces instead), or *Show both*. The choice is offered only where Omarchy 4.5's dock exists; on 4.0 nothing changes.
+- **Omarchy's app grid behind the Omarchy button** — contributed by [@priard](https://github.com/priard) ([#73](https://github.com/thepathless/omadock/pull/73)): a new **Settings → Appearance → Omarchy button opens** choice between the Omarchy menu and Omarchy 4.5's searchable app grid. Apps can be dragged out of the grid onto the dock — the drop line shows where they land, and letting go pins or moves them. The grid is Omarchy's own, loaded only on first open; if it cannot load, the button opens the menu as before.
+- **The dock speaks your language** — contributed by [@priard](https://github.com/priard) ([#74](https://github.com/thepathless/omadock/pull/74)): dock strings now follow Omarchy's display language (Setup → Language, 4.5+), with **Polish** shipping as the first translation. Settings rows, menus, tooltips and popups translate themselves; untranslated strings fall back to English. On Omarchy 4.0 the dock stays in English. Adding a language is documented in the new Translations section of the README.
+- **Verification**: 268 Node + 116 Python tests, `qmllint` 0 errors, structure-check PASSED, plugin validate and manifest-check clean, smoke PASSED, live probe suites (presets, label-metrics, tasks, teardown) green.
 
 ### v4.7.0 — 2026-10-17
 
